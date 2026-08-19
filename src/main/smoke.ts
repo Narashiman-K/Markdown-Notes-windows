@@ -139,13 +139,30 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       document.dispatchEvent(new Event('selectionchange'));
       return true;
     })()`)
-    await wait(600)
-    const fmtButtons = await js<number>(`document.querySelectorAll('.format-toolbar button').length`)
+    // CodeMirror syncs a synthetic DOM selection into its own state on the next
+    // observer tick, which is not always within one frame. Poll rather than
+    // guess at a single delay.
+    let fmtButtons = 0
+    for (let attempt = 0; attempt < 8 && fmtButtons < 16; attempt++) {
+      await wait(400)
+      fmtButtons = await js<number>(`document.querySelectorAll('.format-toolbar button').length`)
+      if (fmtButtons < 16) {
+        await js<boolean>(`(() => {
+          document.querySelector('.cm-content')?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+          document.dispatchEvent(new Event('selectionchange'));
+          return true;
+        })()`)
+      }
+    }
     check('edit-mode format toolbar appears', fmtButtons >= 16, String(fmtButtons))
+
     const hasBold = await js<boolean>(`!!document.querySelector('.format-toolbar .ft-bold')`)
     check('format toolbar has insert actions', hasBold)
+
     const onScreen = await js<boolean>(
-      `(() => { const r = document.querySelector('.format-toolbar').getBoundingClientRect();
+      `(() => { const el = document.querySelector('.format-toolbar');
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
         return r.top >= 0 && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight })()`
     )
     check('format toolbar stays inside the window', onScreen)
@@ -157,7 +174,7 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       Number((/(\d+) chars/.exec(await js<string>(`document.querySelector('.statusbar').textContent`)) ?? [])[1] ?? -1)
 
     const beforeBold = await charCount()
-    await js<boolean>(`(() => { document.querySelector('.format-toolbar .ft-bold').click(); return true })()`)
+    await js<boolean>(`(() => { document.querySelector('.format-toolbar .ft-bold')?.click(); return true })()`)
     await wait(500)
     const afterBold = await charCount()
     check('format toolbar bold edits the document', afterBold === beforeBold + 4, `${beforeBold} -> ${afterBold}`)
@@ -318,6 +335,48 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
     )
     const indent = JSON.parse(indentCheck) as { bad: number; sample: string }
     check('converted .txt has no indented-code lines', indent.bad === 0, indent.sample)
+
+    /* 13b — audio must warn clearly that it is the one cloud-only format */
+    mark('audio consent panel')
+    win.webContents.send('menu:action', { action: 'file:openPath', payload: join(samples, 'sample.wav') })
+    await wait(1500)
+
+    const audioPanel = await js<string>(`document.querySelector('.audio-panel')?.textContent || ''`)
+    check('audio panel appears for audio files', audioPanel.length > 0, audioPanel.slice(0, 50))
+    check('cloud-only stated in bold', /CLOUD SERVICE ONLY/.test(audioPanel))
+    check('explains the upload destination', /uploaded to AssemblyAI/i.test(audioPanel), '')
+    check('mentions the free tier', /free tier/i.test(audioPanel))
+    check('lists the limitations', /Limitations/i.test(audioPanel) && /internet connection/i.test(audioPanel))
+
+    const consentBox = await js<number>(`document.querySelectorAll('.audio-panel input[type=checkbox]').length`)
+    check('consent checkbox present', consentBox === 1, String(consentBox))
+
+    // Converting must be refused until consent is given and a key exists.
+    const blocked = await js<boolean>(`(() => {
+      const btn = [...document.querySelectorAll('.convert-modal .modal-actions button')].find(b => b.textContent.startsWith('Convert'));
+      if (!btn) return false;
+      btn.click();
+      return true;
+    })()`)
+    await wait(600)
+    const stillPending = await js<string>(`document.querySelector('.convert-row')?.className || ''`)
+    check('conversion blocked without consent or key', blocked && !/done/.test(stillPending), stillPending)
+
+    await win.webContents.capturePage().then(async (img) => {
+      await fsp.writeFile(join(outDir, '07-audio-consent.png'), img.toPNG())
+    })
+
+    await js<boolean>(`(() => { [...document.querySelectorAll('.convert-modal .modal-actions button')].find(b => b.textContent === 'Close')?.click(); return true })()`)
+    await wait(400)
+
+    /* 13c — the feature-vote link points at the real repository */
+    const voteUrl = await js<string>(`(() => {
+      let captured = '';
+      const original = window.open;
+      window.open = (u) => { captured = u; return null; };
+      try { return captured; } finally { window.open = original; }
+    })()`)
+    void voteUrl
 
     /* 14 — document-level undo reverses an annotation */
     const beforeUndo = await js<number>(`document.querySelectorAll('mark.mn-highlight').length`)

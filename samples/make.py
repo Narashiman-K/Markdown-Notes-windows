@@ -1,4 +1,4 @@
-﻿import os, zipfile, docx, openpyxl
+import os, zipfile, docx, openpyxl
 from openpyxl import Workbook
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -80,4 +80,11 @@ with zipfile.ZipFile("sample.epub","w") as z:
 # ---- indented TXT (the original annotation bug) ----
 open("sample.txt","w",encoding="utf-8").write("QUARTERLY REPORT\n\n    Revenue grew by 14 percent.\n    The north outperformed.\n\n\tTab indented note.\n")
 open("sample.csv","w",encoding="utf-8").write('Name,Qty,Notes\nWidget,10,"has, a comma"\nGadget,4,plain\n')
+# ---- WAV (a one-second tone; enough to exercise the audio code path) ----
+import wave, struct, math
+w = wave.open("sample.wav","w"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(8000)
+for i in range(8000):
+    w.writeframes(struct.pack("<h", int(3000*math.sin(2*math.pi*440*i/8000))))
+w.close()
+
 print("done:", sorted(os.listdir(".")))

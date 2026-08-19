@@ -1,19 +1,24 @@
+# Build output and dependencies - all rebuildable from source
 node_modules/
 out/
 dist/
 release/
 tmp/
-*.log
-.DS_Store
 tmp_*
+*.log
+*.tsbuildinfo
+
+# Test fixtures - regenerate with: python samples/make.py
 samples/*.docx
 samples/*.xlsx
 samples/*.pdf
 samples/*.pptx
 samples/*.odt
 samples/*.epub
+samples/*.wav
 
 # Personal documents used while testing - never publish these
 Converted-Files/
-*.tsbuildinfo
 backup_*/
+
+.DS_Store

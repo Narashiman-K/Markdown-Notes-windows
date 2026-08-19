@@ -196,11 +196,17 @@ export default function App(): React.JSX.Element {
         if (r.error) flash(r.error)
         return
       }
+      // A file that only needs converting does not replace the open document,
+      // so there is nothing to lose and nothing to ask about.
       if (r.needsConversion && r.filePath) {
         setConvertSeed([r.filePath])
         return
       }
       if (typeof r.content !== 'string' || !r.filePath) return
+
+      // Only now, when the current document is about to be replaced, is it
+      // worth interrupting to ask about unsaved changes.
+      if (!(await guardUnsavedRef.current())) return
 
       loadDocument(r.filePath, r.content)
 
@@ -403,13 +409,10 @@ export default function App(): React.JSX.Element {
         case 'file:new':
           return doNew()
         case 'file:open':
-          if (await guardUnsaved()) return doOpen()
-          return
-        case 'file:openPath': {
-          if (!(await guardUnsaved())) return
+          return doOpen()
+        case 'file:openPath':
           await handleOpenResult(await window.api.readFile(String(payload)))
           return
-        }
         case 'convert:open':
           setConvertSeed([])
           return
