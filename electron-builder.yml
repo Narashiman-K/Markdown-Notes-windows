@@ -1,0 +1,71 @@
+appId: com.suprasuta.markdownnotes
+productName: Suprasuta Markdown Notes
+copyright: Copyright (c) 2026 Narashiman Krishnamurthy
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+
+asar: true
+compression: maximum
+
+# Ship only English resources; each extra locale is a separate .pak file.
+electronLanguages: [en-US]
+
+
+fileAssociations:
+  - ext: md
+    name: Markdown Document
+    description: Markdown Document
+    role: Editor
+    icon: build/icon.ico
+  - ext: markdown
+    name: Markdown Document
+    role: Editor
+    icon: build/icon.ico
+  - ext: mdown
+    name: Markdown Document
+    role: Editor
+    icon: build/icon.ico
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+  artifactName: Suprasuta-Markdown-Notes-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Suprasuta Markdown Notes
+  deleteAppDataOnUninstall: false
+
+# ---------------------------------------------------------------------------
+# Microsoft Store (MSIX/AppX).
+# These three values are copied verbatim from Partner Center →
+# Product management → Product Identity. They must match character for
+# character or the upload is rejected.
+#   Store ID:  9N1S7QP2WNLX
+#   Listing:   https://apps.microsoft.com/detail/9N1S7QP2WNLX
+# ---------------------------------------------------------------------------
+appx:
+  applicationId: SuprasutaMarkdownNotes
+  identityName: Narashiman.SuprasutaMarkdownNotes
+  publisher: CN=005C2E45-50DB-47BC-8A87-8C363696127C
+  publisherDisplayName: Narashiman
+  displayName: Suprasuta Markdown Notes
+  backgroundColor: '#0f6cbd'
+  languages: [en-US]
+  showNameOnTiles: true
+  setBuildNumber: true
+
+

@@ -1,0 +1,19 @@
+node_modules/
+out/
+dist/
+release/
+tmp/
+*.log
+.DS_Store
+tmp_*
+samples/*.docx
+samples/*.xlsx
+samples/*.pdf
+samples/*.pptx
+samples/*.odt
+samples/*.epub
+
+# Personal documents used while testing - never publish these
+Converted-Files/
+*.tsbuildinfo
+backup_*/
