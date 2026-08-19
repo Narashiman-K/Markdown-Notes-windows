@@ -106,8 +106,25 @@ export default function AiPanel(props: AiPanelProps): React.JSX.Element {
     window.api.aiKeyState().then(setKeyState)
   }, [refreshStatus])
 
+  /**
+   * Scroll so the *start* of the newest exchange is visible.
+   *
+   * Scrolling to the bottom of the container looks obvious but is wrong here:
+   * it lands on the citation chips and action buttons that follow an answer,
+   * pushing the answer itself off the top of the panel. The user then has to
+   * scroll up to read what they just asked for.
+   */
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+    const container = scrollRef.current
+    if (!container) return
+    const lastQuestion = container.querySelectorAll('.ai-turn.user')
+    const anchor = lastQuestion[lastQuestion.length - 1] as HTMLElement | undefined
+
+    if (anchor) {
+      container.scrollTo({ top: anchor.offsetTop - container.offsetTop - 8, behavior: 'smooth' })
+    } else {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
+    }
   }, [turns, busy])
 
   const changeProvider = async (p: ProviderId): Promise<void> => {

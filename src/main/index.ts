@@ -24,6 +24,16 @@ const MD_FILTERS = [
 
 const READABLE_EXTS = TEXT_EXTS
 
+/** Locates the app icon in both the development tree and a packaged build. */
+function appIconPath(): string | undefined {
+  const candidates = [
+    join(process.resourcesPath ?? '', 'icon.ico'),
+    join(app.getAppPath(), 'build', 'icon.ico'),
+    join(app.getAppPath(), '..', 'build', 'icon.ico')
+  ]
+  return candidates.find((p) => existsSync(p))
+}
+
 function extOf(p: string): string {
   const m = /\.([^.\\/]+)$/.exec(p)
   return m ? m[1].toLowerCase() : ''
@@ -46,6 +56,10 @@ function createWindow(): void {
     autoHideMenuBar: false,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1f1f1f' : '#ffffff',
     title: APP_DISPLAY_NAME,
+    // Without this the window and taskbar show Electron's default icon during
+    // development. The packaged executable carries the icon itself, but setting
+    // it here makes both builds consistent.
+    icon: appIconPath(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -59,6 +73,16 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
+    if (process.env['MARKNOTE_SHOTS'] === '1' && mainWindow) {
+      const win = mainWindow
+      import('./shots')
+        .then((m) => m.runShots(win, join(app.getAppPath(), 'store-screenshots')))
+        .catch((err) => {
+          console.error('[shots] failed to start:', err)
+          app.exit(1)
+        })
+      return
+    }
     if (process.env['MARKNOTE_SMOKE'] === '1' && mainWindow) {
       const win = mainWindow
       import('./smoke')

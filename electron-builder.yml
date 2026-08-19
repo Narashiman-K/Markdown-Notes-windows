@@ -14,6 +14,11 @@ files:
 asar: true
 compression: maximum
 
+# The icon must exist as a real file for BrowserWindow to load it.
+extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+
 # Ship only English resources; each extra locale is a separate .pak file.
 electronLanguages: [en-US]
 
