@@ -1,0 +1,5 @@
+# GitHub Pages configuration.
+# Serves the privacy policy and a small landing page from the /docs folder.
+theme: jekyll-theme-cayman
+title: Suprasūtā Markdown Notes
+description: Markdown viewer, editor, annotator and document converter for Windows 11
