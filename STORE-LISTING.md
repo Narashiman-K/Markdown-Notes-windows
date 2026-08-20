@@ -204,6 +204,41 @@ The app collects no data, has no analytics and no server. Cloud features are off
 
 ---
 
+## Restricted capability justification (runFullTrust)
+
+Partner Center flags `runFullTrust` on every Electron app and asks you to justify
+it before the submission can proceed. This is routine, not a fault in the
+package: Electron apps are Win32 desktop applications packaged via the Desktop
+Bridge, and `runFullTrust` is what allows a Win32 process to run at all.
+electron-builder declares it automatically.
+
+Vague answers get rejected. Paste this into
+*"Why do you need the runFullTrust capability, and how will it be used in your
+product?"*
+
+```
+Suprasuta Markdown Notes is a Win32 desktop application built with Electron and packaged for the Store using the Desktop Bridge. Electron applications run as full-trust Win32 processes, so runFullTrust is required for the application to launch at all. It is declared automatically by the packaging tool (electron-builder), not requested for any additional privilege.
+
+Full trust is used for the following, each initiated by the user:
+
+1. Reading and writing documents the user selects through the standard Windows file dialogs — Markdown, text, PDF, Word, Excel, PowerPoint, OpenDocument, EPUB, CSV, images and audio. The app accesses only files the user explicitly opens or saves, plus a destination folder the user chooses for converted output.
+
+2. Printing, and exporting to PDF or HTML, through the standard Windows print dialog.
+
+3. Encrypting the user's optional API keys at rest with the Windows Data Protection API (DPAPI) via Electron's safeStorage, so stored credentials are readable only by that Windows user account on that machine.
+
+4. Outbound HTTPS requests to a third-party AI provider (Anthropic, OpenAI, Google or AssemblyAI), only when the user explicitly enables an optional feature and supplies their own API key. These features are disabled by default.
+
+5. A local HTTP connection to 127.0.0.1:11434, if the user chooses to run the optional AI assistant locally via Ollama. This never leaves the machine.
+
+The application does not require elevation, does not install services or drivers, does not modify system settings, does not write outside its own application storage and folders the user selects, and does not run in the background after being closed. It collects no telemetry and contains no advertising.
+
+The full source code is public and can be reviewed at:
+https://github.com/Narashiman-K/Markdown-Notes-windows
+```
+
+---
+
 ## Pricing and availability
 
 - **Price:** Free
