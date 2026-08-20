@@ -820,3 +820,53 @@ html[data-theme='dark'] .ok-text { color: #6bd396; }
   background: var(--bg);
   box-shadow: var(--shadow);
 }
+
+/* ===================================================================== */
+/* AI answer layout                                                      */
+/*                                                                       */
+/* .ai-answer also carries .markdown-body so it inherits document        */
+/* typography. But markdown.css loads after app.css and both selectors   */
+/* have equal specificity, so .markdown-body's padding wins — including  */
+/* its 45vh bottom padding, which exists so the last line of a document  */
+/* can scroll to the middle of the screen. Inside a narrow panel that is */
+/* simply a large empty gap under every answer.                          */
+/*                                                                       */
+/* Two class names raise specificity enough to win regardless of order.  */
+/* ===================================================================== */
+
+.ai-panel .ai-answer.markdown-body {
+  padding: 0;
+  margin: 0;
+  max-width: none;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+/* Wide content must scroll inside the panel, not stretch it. */
+.ai-panel .ai-answer.markdown-body pre,
+.ai-panel .ai-answer.markdown-body table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.ai-panel .ai-answer.markdown-body pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11.5px;
+  padding: 8px 10px;
+}
+.ai-panel .ai-answer.markdown-body code {
+  overflow-wrap: anywhere;
+}
+.ai-panel .ai-answer.markdown-body > *:first-child { margin-top: 0; }
+.ai-panel .ai-answer.markdown-body > *:last-child { margin-bottom: 0; }
+.ai-panel .ai-answer.markdown-body h1,
+.ai-panel .ai-answer.markdown-body h2,
+.ai-panel .ai-answer.markdown-body h3 {
+  font-size: 1.05em;
+  border: none;
+  padding: 0;
+  margin: 0.8em 0 0.3em;
+}
+
+/* Nothing in the panel may push it horizontally. */
+.ai-panel, .ai-panel .ai-scroll { max-width: 100%; overflow-x: hidden; }
