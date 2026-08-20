@@ -64,6 +64,7 @@ const api = {
   /** True only during the gated end-to-end smoke run; never set for users. */
   smokeMode: process.env['MARKNOTE_SMOKE'] === '1',
 
+  rendererReady: () => ipcRenderer.invoke('app:rendererReady'),
   appInfo: () => ipcRenderer.invoke('app:info'),
   setTitle: (args: { filePath: string | null; dirty: boolean }) => ipcRenderer.invoke('app:setTitle', args),
   forceClose: () => ipcRenderer.invoke('app:forceClose'),

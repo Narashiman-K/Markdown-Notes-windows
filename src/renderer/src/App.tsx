@@ -692,6 +692,10 @@ export default function App(): React.JSX.Element {
     document.addEventListener('selectionchange', onSel)
     setSystemDark(window.matchMedia('(prefers-color-scheme: dark)').matches)
 
+    // Tell the main process we are listening. Only now is it safe for it to
+    // send a file that was passed on the command line (a double-clicked .md).
+    void window.api.rendererReady()
+
     return () => {
       offMenu()
       offOpened()

@@ -94,10 +94,10 @@ function createWindow(): void {
         })
       return
     }
-    if (pendingOpenPath) {
-      openPathInRenderer(pendingOpenPath)
-      pendingOpenPath = null
-    }
+    // Note: a file passed on the command line is NOT opened here. 'ready-to-show'
+    // fires when the page has painted, which can be before React has mounted and
+    // subscribed to IPC — the message would be sent into the void. The renderer
+    // announces itself via 'renderer:ready' instead, and we flush it then.
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -580,6 +580,20 @@ function registerIpc(): void {
     })
     if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
     return { ok: true, filePath: r.filePaths[0] }
+  })
+
+  /**
+   * The renderer calls this once its listeners are attached. Any file passed on
+   * the command line — which is how Windows opens a .md by double-click — is
+   * delivered now, when something is actually listening for it.
+   */
+  ipcMain.handle('app:rendererReady', () => {
+    if (pendingOpenPath) {
+      const path = pendingOpenPath
+      pendingOpenPath = null
+      void openPathInRenderer(path)
+    }
+    return { ok: true }
   })
 
   ipcMain.handle('app:info', () => ({

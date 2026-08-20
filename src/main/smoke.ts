@@ -57,6 +57,15 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
     await fsp.mkdir(outDir, { recursive: true })
     await wait(1200)
 
+    /* 0 — a file passed on the command line must actually load.
+       This is how Windows opens a .md by double-click, and it is easy to break:
+       if the file is sent before the renderer is listening, it vanishes. */
+    const argFile = process.env['MARKNOTE_SMOKE_ARGFILE']
+    if (argFile) {
+      const title = await js<string>(`document.querySelector('.tb-title')?.textContent || ''`)
+      check('file from the command line opens', title.includes('SUBMIT-TO-STORE'), title)
+    }
+
     /* 1 — the welcome document renders */
     const heading = await js<string>(`document.querySelector('.markdown-body h1')?.textContent || ''`)
     check('renders markdown', heading.includes('Welcome to Suprasūtā Markdown Notes'), heading)

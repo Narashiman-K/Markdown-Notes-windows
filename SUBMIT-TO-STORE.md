@@ -93,15 +93,51 @@ final until you press Submit at the very end, so you can leave and come back.
 
 ## Step 5 — Pricing and availability
 
-| Field | Set it to |
-| --- | --- |
-| Base price | **Free** |
-| Free trial | No free trial |
-| Markets | **All markets** (the default) |
-| Visibility | **Public** — available and discoverable |
-| Schedule | **Publish as soon as it passes certification** |
+Most of this page is already correct by default. There is **one thing you must
+set**, and it is not where you would expect.
 
-Click **Save**.
+### The bit that blocks you
+
+At the top you will see:
+
+> *No PriceSchedule created for purchasable product. You must configure a price
+> for this product.*
+
+"Free" is still a price you have to choose explicitly. It lives inside the
+**Market groups** box, not in an obvious "price" field.
+
+Scroll to **Pricing → Market groups → Default → Base price**:
+
+1. **Currency** — choose **USD – US Dollar**. This is only the reference
+   currency Microsoft converts from; it does not restrict availability.
+2. **Retail price** — greyed out until a currency is chosen. Once enabled,
+   select **Free**, which sits above the numbered price tiers.
+
+The warning banner disappears once both are set.
+
+### Leave these as they are
+
+| Section | Should already say |
+| --- | --- |
+| Markets | All worldwide markets |
+| Future markets | Ticked |
+| Audience | Public audience |
+| Discoverability | Available and discoverable in the Store |
+| Release | As soon as possible |
+| Stop acquisition | Never |
+| Free trial | None configured |
+| Sale pricing | None configured |
+
+### One decision worth making
+
+At the bottom, **Organizational licensing** defaults to allowing organisations to
+volume-acquire the app through Microsoft Store for Business.
+
+That contradicts the personal, non-commercial licence. Click **Show options** and
+untick volume acquisition if you want the Store's behaviour to match your terms.
+Not a blocker, but leaving it on invites precisely the use the licence forbids.
+
+Click **Save draft**.
 
 ---
 
