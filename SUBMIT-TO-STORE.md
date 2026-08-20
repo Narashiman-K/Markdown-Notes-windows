@@ -199,8 +199,23 @@ Click **Save**.
 
 ## Step 9 — Store listing
 
-Click **Store listings** → **English (United States)** (or add your preferred
-language first).
+### First: make sure there is only ONE listing
+
+The Store listings page shows two tables:
+
+- **Languages supported in packages** — this should contain
+  **English (United States)**, taken from your package
+- **Additional Store listing languages** — this should be **empty**
+
+If a plain **English** entry has appeared in the second table, click **Remove**
+beside it and press **Save**. Partner Center treats `English` and
+`English (United States)` as two separate listings, and **both** must be
+completed before the section turns green. Filling one while the other sits empty
+is the usual reason this step stays stuck on *Incomplete* no matter what you do.
+
+### Then fill it in
+
+Click **English (United States)**.
 
 Open `STORE-LISTING.md` beside you and copy each block across:
 
@@ -213,8 +228,20 @@ Open `STORE-LISTING.md` beside you and copy each block across:
 | Search terms | "Search terms" — one per box, up to 7 |
 | Screenshots | The images from Step 3 |
 
-**Screenshots are mandatory.** Upload at least one. Add a short caption to each
-if you like — it helps, but is optional.
+**Only two fields actually gate completion: the Description, and at least one
+screenshot.** Everything else improves the listing but will not hold it back.
+
+**Screenshots are mandatory and must be at least 1366×768.** The uploader can
+reject an undersized image without saying much, leaving the listing stuck on
+*Incomplete*. All five files in `store-screenshots/` are 1921×978 and will be
+accepted. Add a short caption to each if you like — optional.
+
+If the listing still shows *Incomplete* after saving, the cause is almost always
+one of:
+
+1. A second, empty listing under *Additional Store listing languages*
+2. No screenshot uploaded, or one that was rejected for being too small
+3. The Description box left empty
 
 Leave Store logos, trailers and additional art blank. Your app icon comes from
 the package itself.
