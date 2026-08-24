@@ -9,6 +9,9 @@ annotated document stays a portable Markdown file. Converts PDF, Word, Excel,
 PowerPoint, EPUB and more. Answers questions about your documents using a local
 AI model or your own API key.
 
+### → [Get it on the Microsoft Store](https://apps.microsoft.com/detail/9N1S7QP2WNLX)
+
+[![Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-Download-0078D4?logo=microsoftstore&logoColor=white)](https://apps.microsoft.com/detail/9N1S7QP2WNLX)
 [![Build](https://github.com/Narashiman-K/Markdown-Notes-windows/actions/workflows/build.yml/badge.svg)](https://github.com/Narashiman-K/Markdown-Notes-windows/actions/workflows/build.yml)
 [![Licence: Personal use](https://img.shields.io/badge/licence-personal%20use-blue)](LICENSE.md)
 [![Platform: Windows 11](https://img.shields.io/badge/platform-Windows%2011-0078D4)](#)

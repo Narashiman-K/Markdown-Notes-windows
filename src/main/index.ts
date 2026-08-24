@@ -8,7 +8,7 @@ import * as ai from './ai'
 import * as secrets from './secrets'
 import { transcribe as transcribeAudio } from './transcribe'
 import { NATIVE_EXTS, TEXT_EXTS, DOCUMENT_EXTS, IMAGE_EXTS, CONVERTIBLE_EXTS, isConvertible } from '../shared/formats'
-import { APP_ASCII_NAME, APP_DISPLAY_NAME, APP_ID } from '../shared/brand'
+import { APP_ASCII_NAME, APP_DISPLAY_NAME, APP_ID, STORE_REVIEW_URL } from '../shared/brand'
 
 const isDev = !app.isPackaged
 let mainWindow: BrowserWindow | null = null
@@ -102,6 +102,11 @@ function createWindow(): void {
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) shell.openExternal(url)
+    // One narrow exception to the http-only rule: the Store's own review
+    // dialog for this exact product. Pinning the whole URL rather than the
+    // scheme means a stray link cannot use ms-windows-store: to open an
+    // arbitrary Store page or protocol handler.
+    else if (url === STORE_REVIEW_URL) shell.openExternal(url)
     return { action: 'deny' }
   })
 

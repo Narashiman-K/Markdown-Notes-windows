@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import logoMark from '../assets/logo-mark.png'
 import { AUTHOR, LINKEDIN_URL, SIGNATURE } from '../lib/signature'
-import { APP_DISPLAY_NAME, TAGLINE } from '../../../shared/brand'
+import { APP_DISPLAY_NAME, TAGLINE, STORE_REVIEW_URL } from '../../../shared/brand'
 
 interface AppInfo {
   name: string
@@ -51,7 +51,10 @@ export default function AboutDialog({ onClose }: Props): React.JSX.Element {
           </p>
 
           <p>
-            Please do comment and give it <strong>5 stars</strong> if you like it. Thanks!
+            Please do comment and give it <strong>5 stars</strong> if you like it. Thanks!{' '}
+            <a href={STORE_REVIEW_URL} onClick={open(STORE_REVIEW_URL)}>
+              Write a review
+            </a>
           </p>
 
           <p>

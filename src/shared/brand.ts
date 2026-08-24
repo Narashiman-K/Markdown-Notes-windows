@@ -21,6 +21,22 @@ export const TAGLINE = 'Markdown viewer, editor, annotator and AI reading compan
 
 export const REPO_URL = 'https://github.com/Narashiman-K/Markdown-Notes-windows'
 
+/** Product ID assigned by Partner Center. */
+export const STORE_PRODUCT_ID = '9N1S7QP2WNLX'
+
+/**
+ * The public listing. Kept free of the `ocid`/`hl`/`gl` parameters the Store's
+ * share button appends, which pin the page to one locale.
+ */
+export const STORE_URL = `https://apps.microsoft.com/detail/${STORE_PRODUCT_ID}`
+
+/**
+ * Opens the Store app straight onto the review box for this product, rather
+ * than the listing page with a review button somewhere on it. Far more people
+ * finish a review when the box is already in front of them.
+ */
+export const STORE_REVIEW_URL = `ms-windows-store://review/?ProductId=${STORE_PRODUCT_ID}`
+
 /**
  * Opens a pre-filled GitHub issue so interest in the planned repo-to-docs
  * feature can actually be counted, rather than guessed at.
