@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 /**
  * Converters that need a DOM (Word, spreadsheets, PowerPoint, ODT, EPUB) run
  * against the real sample files in samples/. These are fast, unlike driving the
@@ -6,7 +5,21 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { JSDOM } from 'jsdom'
+
+/*
+ * Runs in the `node` environment with a DOMParser supplied by hand, rather
+ * than in the jsdom environment.
+ *
+ * Asking for jsdom made Vite resolve every import for the browser and
+ * externalise the node builtins, so `join` came back undefined and the whole
+ * suite failed to load — on Windows only, which made it look like a platform
+ * quirk. The converters need only `DOMParser`, so supplying just that is both
+ * smaller and portable.
+ */
+globalThis.DOMParser = new JSDOM('').window.DOMParser
 import {
   convertDocx,
   convertSheet,
@@ -17,7 +30,7 @@ import {
 } from '../src/renderer/src/lib/convert/office'
 import { htmlToMarkdown } from '../src/renderer/src/lib/convert/html'
 
-const samples = join(__dirname, '..', 'samples')
+const samples = join(dirname(fileURLToPath(import.meta.url)), '..', 'samples')
 const read = (name: string): Uint8Array => new Uint8Array(readFileSync(join(samples, name)))
 const have = (name: string): boolean => existsSync(join(samples, name))
 

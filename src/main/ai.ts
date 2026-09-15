@@ -51,7 +51,14 @@ const FALLBACK_MODELS: Record<ProviderId, string[]> = {
   ollama: [],
   anthropic: ['claude-sonnet-4-5', 'claude-opus-4-5', 'claude-haiku-4-5'],
   openai: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o'],
-  gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash']
+  /*
+   * Verified against the live API on 2026-09-16. The 2.5 names that used to be
+   * here now return 404 "no longer available to new users" — they still appear
+   * in the models list, so listing them looked safe and was not. Aliases are
+   * preferred because they cannot rot; gemini-pro-latest is quota-limited on a
+   * free key but works on a paid one.
+   */
+  gemini: ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-flash-lite-latest', 'gemini-pro-latest']
 }
 
 export function keyName(provider: ProviderId): 'anthropic' | 'openai' | 'gemini' | null {
@@ -265,8 +272,17 @@ const OCR_PROMPT =
   'If there are charts, tables, diagrams or graphics, describe them beneath the text so a reader who ' +
   'cannot see the image still understands the visual structure. Do not wrap your whole answer in a code fence.'
 
-/** Model names change; try in order and use whichever the account can reach. */
-const VISION_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-1.5-flash']
+/*
+ * Tried in order until one answers.
+ *
+ * The alias comes first deliberately. Google retires pinned names on its own
+ * schedule — gemini-2.0-flash and gemini-1.5-flash were both 404ing by
+ * September 2026, while this list still named them — and an app that sits in a
+ * store for months cannot chase that. `gemini-flash-latest` always resolves to
+ * a current model, with one pinned name behind it in case the alias is ever
+ * withdrawn.
+ */
+const VISION_MODELS = ['gemini-flash-latest', 'gemini-3.8-flash']
 
 export async function visionOcr(
   key: string,
