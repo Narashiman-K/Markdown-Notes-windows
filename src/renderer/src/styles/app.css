@@ -438,14 +438,25 @@ html[data-theme='dark'] .warn { color: #ffb454; }
   gap: 16px;
   margin-bottom: 14px;
 }
+/*
+ * Two real logo files, one shown per theme.
+ *
+ * This used to be a single image with `invert(1) brightness(0.35)` applied on
+ * light themes, which is what you do when you only have one asset — it flips
+ * the hues and flattens the metallic gradient into grey. The pack ships a mark
+ * drawn for each background, so the swap is now the actual artwork.
+ *
+ * Done in CSS against the theme attribute rather than by passing a prop, so it
+ * changes the instant the theme does, with no component needing to know.
+ */
 .about-logo {
   width: 76px;
   height: 76px;
   object-fit: contain;
   flex: 0 0 auto;
-  filter: var(--logo-filter, none);
 }
-html[data-theme='light'] .about-logo { filter: invert(1) brightness(0.35); }
+html[data-theme='light'] .about-logo.for-dark { display: none; }
+html[data-theme='dark'] .about-logo.for-light { display: none; }
 .about-head h2 { margin: 0 0 2px; font-size: 20px; }
 .about-body p { margin: 0 0 10px; line-height: 1.55; }
 .about-body a { color: var(--link); }

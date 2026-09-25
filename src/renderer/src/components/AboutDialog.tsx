@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import logoMark from '../assets/logo-mark.png'
+import logoOnLight from '../assets/logo-on-light.png'
+import logoOnDark from '../assets/logo-on-dark.png'
 import { AUTHOR, LINKEDIN_URL, SIGNATURE } from '../lib/signature'
 import { APP_DISPLAY_NAME, TAGLINE, STORE_REVIEW_URL } from '../../../shared/brand'
 
@@ -31,7 +32,11 @@ export default function AboutDialog({ onClose }: Props): React.JSX.Element {
     <div className="modal-backdrop" data-mn-ignore onMouseDown={onClose}>
       <div className="modal about-modal" onMouseDown={(e) => e.stopPropagation()} data-signature={SIGNATURE}>
         <div className="about-head">
-          <img className="about-logo" src={logoMark} alt={APP_DISPLAY_NAME} draggable={false} />
+          {/* Both are rendered; the stylesheet shows whichever suits the
+              current theme. The alt text sits on one only, so a screen reader
+              announces the logo once rather than twice. */}
+          <img className="about-logo for-light" src={logoOnLight} alt={APP_DISPLAY_NAME} draggable={false} />
+          <img className="about-logo for-dark" src={logoOnDark} alt="" aria-hidden="true" draggable={false} />
           <div>
             <h2>{APP_DISPLAY_NAME}</h2>
             <p className="muted small">
