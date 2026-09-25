@@ -34,6 +34,31 @@ export const md: MarkdownIt = new MarkdownIt({
   .use(footnote)
   .use(deflist)
 
+/*
+ * Stamps each block element with the source line it came from.
+ *
+ * This is what lets the preview and the editor scroll together: given a line
+ * the editor is showing, the preview can find the element that came from it,
+ * and the reverse. markdown-it already tracks `token.map` for block tokens, so
+ * nothing has to be inferred.
+ *
+ * Opt-in through the render environment rather than always on, because the
+ * same renderer produces exported and printed HTML, and line numbers from a
+ * document the reader never sees have no business being in the output.
+ *
+ * Only top-level tokens are walked. Inline content lives inside `inline`
+ * tokens and has no map of its own, and line-level precision is all scroll
+ * syncing can use anyway.
+ */
+md.core.ruler.push('suprasuta_source_lines', (state) => {
+  if (!(state.env as { sourceLines?: boolean } | undefined)?.sourceLines) return
+  for (const token of state.tokens) {
+    // nesting 1 is an opening tag, 0 is self-closing; -1 is a closing tag and
+    // carries no attributes of its own.
+    if (token.map && token.nesting >= 0) token.attrSet('data-line', String(token.map[0]))
+  }
+})
+
 export interface Heading {
   level: number
   text: string
@@ -73,8 +98,9 @@ const PURIFY_CONFIG = {
   ALLOW_DATA_ATTR: true
 }
 
-export function renderMarkdown(source: string): string {
-  return DOMPurify.sanitize(md.render(source), PURIFY_CONFIG) as unknown as string
+export function renderMarkdown(source: string, options?: { sourceLines?: boolean }): string {
+  const html = md.render(source, { sourceLines: options?.sourceLines === true })
+  return DOMPurify.sanitize(html, PURIFY_CONFIG) as unknown as string
 }
 
 export function extractHeadings(source: string): Heading[] {

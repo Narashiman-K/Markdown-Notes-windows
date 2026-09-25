@@ -20,6 +20,7 @@ import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, HighlightSt
 import { tags as t } from '@lezer/highlight'
 import type { TextEdit } from '../lib/editing'
 import { blockTints, DEFAULT_BLOCK_TINTS, type BlockKind } from '../lib/blockTints'
+import type { ScrollSyncTarget } from '../lib/syncScroll'
 
 export interface EditorHandle {
   getSelection: () => { from: number; to: number }
@@ -30,6 +31,8 @@ export interface EditorHandle {
   /** Returns false when the editor's own history had nothing to reverse. */
   undo: () => boolean
   redo: () => boolean
+  /** Scroll-sync handle, or null before the view exists. */
+  scrollTarget: () => ScrollSyncTarget | null
 }
 
 interface Props {
@@ -220,6 +223,39 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
     focus: () => viewRef.current?.focus(),
     undo: () => (viewRef.current ? cmUndo(viewRef.current) : false),
     redo: () => (viewRef.current ? cmRedo(viewRef.current) : false),
+
+    /*
+     * The scroll-sync view of this editor.
+     *
+     * Lines are reported zero-based to match `data-line` in the rendered HTML;
+     * CodeMirror counts from one, hence the adjustments. `blockAtHeight` and
+     * `lineBlockAt` are used rather than multiplying by a line height, because
+     * wrapped lines and the tinted blocks make rows different heights — a
+     * uniform-height assumption drifts badly in exactly the long documents
+     * this feature exists for.
+     */
+    scrollTarget: (): ScrollSyncTarget | null => {
+      const view = viewRef.current
+      if (!view) return null
+
+      return {
+        scroller: view.scrollDOM,
+        topLine: () => {
+          const top = view.scrollDOM.scrollTop
+          const block = view.lineBlockAtHeight(top)
+          const line = view.state.doc.lineAt(block.from)
+          // Interpolate within the block so a half-scrolled paragraph maps to
+          // a fractional line rather than snapping to its first.
+          const within = block.height > 0 ? (top - block.top) / block.height : 0
+          return line.number - 1 + Math.min(1, Math.max(0, within))
+        },
+        scrollToLine: (line: number) => {
+          const clamped = Math.max(1, Math.min(Math.floor(line) + 1, view.state.doc.lines))
+          const block = view.lineBlockAt(view.state.doc.line(clamped).from)
+          view.scrollDOM.scrollTop = block.top + (line - Math.floor(line)) * block.height
+        }
+      }
+    },
     gotoLine: (line: number) => {
       const view = viewRef.current
       if (!view) return

@@ -32,6 +32,7 @@ import {
 } from './lib/annotations'
 import { wrapSelection, prefixLines, insertBlock, TABLE_SNIPPET, toFileUrl } from './lib/editing'
 import { DEFAULT_BLOCK_TINTS, type BlockKind } from './lib/blockTints'
+import { linkScrollers, previewScrollTarget } from './lib/syncScroll'
 import { ZOOM_LEVELS, type AnnotationType } from '../../shared/types'
 import markdownCss from './styles/markdown.css?inline'
 import hljsCss from 'highlight.js/styles/github.css?inline'
@@ -86,6 +87,8 @@ export default function App(): React.JSX.Element {
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY)
   const [reviewChanges, setReviewChanges] = useState(true)
   const [blockTints, setBlockTints] = useState<BlockKind[]>(() => [...DEFAULT_BLOCK_TINTS])
+  const livePreviewRef = useRef<HTMLDivElement>(null)
+  const livePreviewBodyRef = useRef<HTMLElement>(null)
   const [pendingDiff, setPendingDiff] = useState<{ next: string; label: string } | null>(null)
   const [dialog, setDialog] = useState<
     | { kind: 'newComment'; range: [number, number] }
@@ -98,6 +101,30 @@ export default function App(): React.JSX.Element {
   const editorRef = useRef<EditorHandle>(null)
 
   const dark = theme === 'dark' || (theme === 'system' && systemDark)
+
+  /*
+   * Join the editor and the live preview once both are on screen.
+   *
+   * Keyed on `mode` because the split only exists while editing; leaving edit
+   * mode unmounts the preview, and a listener left on a detached element would
+   * keep it alive. The editor's own view is rebuilt when the theme or zoom
+   * changes, so those belong in the dependency list too — the handle would
+   * otherwise point at a destroyed CodeMirror.
+   */
+  useEffect(() => {
+    if (mode !== 'edit') return
+    const scroller = livePreviewRef.current
+    const body = livePreviewBodyRef.current
+    const editor = editorRef.current?.scrollTarget()
+    if (!scroller || !body || !editor) return
+
+    // Below 1060px the stylesheet hides the preview — there is no room for
+    // both panes — and a hidden element measures as zero, so linking to it
+    // would feed meaningless offsets back into the editor.
+    if (scroller.offsetParent === null) return
+
+    return linkScrollers(editor, previewScrollTarget(scroller, body))
+  }, [mode, dark, zoom])
   const headings = useMemo(() => extractHeadings(content), [content])
   const annotations = useMemo(() => listAnnotations(content), [content])
   const stats = useMemo(() => documentStats(content), [content])
@@ -858,11 +885,12 @@ export default function App(): React.JSX.Element {
                 onFormat={(action) => void actionRef.current(action)}
                 blockTintKinds={blockTints}
               />
-              <div className="live-preview">
+              <div className="live-preview" ref={livePreviewRef}>
                 <article
+                  ref={livePreviewBodyRef}
                   className="markdown-body"
                   style={{ fontSize: `${zoom * 15}px` }}
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(content, { sourceLines: true }) }}
                 />
               </div>
             </div>
