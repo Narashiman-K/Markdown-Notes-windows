@@ -31,6 +31,7 @@ import {
   updateNote
 } from './lib/annotations'
 import { wrapSelection, prefixLines, insertBlock, TABLE_SNIPPET, toFileUrl } from './lib/editing'
+import { DEFAULT_BLOCK_TINTS, type BlockKind } from './lib/blockTints'
 import { ZOOM_LEVELS, type AnnotationType } from '../../shared/types'
 import markdownCss from './styles/markdown.css?inline'
 import hljsCss from 'highlight.js/styles/github.css?inline'
@@ -84,6 +85,7 @@ export default function App(): React.JSX.Element {
   const [selectionText, setSelectionText] = useState('')
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY)
   const [reviewChanges, setReviewChanges] = useState(true)
+  const [blockTints, setBlockTints] = useState<BlockKind[]>(() => [...DEFAULT_BLOCK_TINTS])
   const [pendingDiff, setPendingDiff] = useState<{ next: string; label: string } | null>(null)
   const [dialog, setDialog] = useState<
     | { kind: 'newComment'; range: [number, number] }
@@ -682,6 +684,9 @@ export default function App(): React.JSX.Element {
       if (s?.theme) setTheme(s.theme)
       if (s?.zoom) setZoom(s.zoom)
       if (typeof s?.aiReviewChanges === 'boolean') setReviewChanges(s.aiReviewChanges)
+      // Absent means the setting predates this feature, which is not the same
+      // as an empty array — that is a deliberate "tint nothing".
+      if (Array.isArray(s?.blockTints)) setBlockTints(s.blockTints as BlockKind[])
     })
 
     // Track the current selection so the AI panel can explain it.
@@ -851,6 +856,7 @@ export default function App(): React.JSX.Element {
                 onChange={(v) => updateContent(v)}
                 onCursor={(line, col) => setCursor({ line, col })}
                 onFormat={(action) => void actionRef.current(action)}
+                blockTintKinds={blockTints}
               />
               <div className="live-preview">
                 <article

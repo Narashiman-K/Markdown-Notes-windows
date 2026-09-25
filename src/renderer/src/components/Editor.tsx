@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import FormatToolbar from './FormatToolbar'
-import { EditorState, type Extension } from '@codemirror/state'
+import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import {
   EditorView,
   keymap,
@@ -19,6 +19,7 @@ import { languages } from '@codemirror/language-data'
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, HighlightStyle } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 import type { TextEdit } from '../lib/editing'
+import { blockTints, DEFAULT_BLOCK_TINTS, type BlockKind } from '../lib/blockTints'
 
 export interface EditorHandle {
   getSelection: () => { from: number; to: number }
@@ -39,7 +40,16 @@ interface Props {
   onCursor?: (line: number, col: number) => void
   /** Fires when a button on the floating selection toolbar is pressed. */
   onFormat?: (action: string) => void
+  /** Which block kinds get a background tint. Omit for the default pair. */
+  blockTintKinds?: readonly BlockKind[]
 }
+
+/*
+ * Held in a compartment so the tint setting can be changed on a live editor.
+ * The alternative — adding it to the dependency list that rebuilds the view —
+ * would discard the undo history every time someone toggled a colour.
+ */
+const tintCompartment = new Compartment()
 
 const mdHighlight = HighlightStyle.define([
   { tag: t.heading1, fontSize: '1.5em', fontWeight: '700' },
@@ -57,9 +67,11 @@ const mdHighlight = HighlightStyle.define([
 ])
 
 const Editor = forwardRef<EditorHandle, Props>(function Editor(
-  { value, dark, zoom, onChange, onCursor, onFormat },
+  { value, dark, zoom, onChange, onCursor, onFormat, blockTintKinds = DEFAULT_BLOCK_TINTS },
   ref
 ) {
+  const tintKindsRef = useRef(blockTintKinds)
+  tintKindsRef.current = blockTintKinds
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
@@ -104,6 +116,7 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
       highlightActiveLine(),
       highlightSelectionMatches(),
       search({ top: true }),
+      tintCompartment.of(blockTints(tintKindsRef.current, dark)),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
@@ -165,6 +178,15 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
     // Recreate only when the theme or zoom changes; content is synced below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dark, zoom])
+
+  // Reconfigure the tints in place. `dark` is in the list because the colours
+  // differ per theme, but a theme change rebuilds the view anyway — this only
+  // has to catch the setting changing on its own.
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: tintCompartment.reconfigure(blockTints(blockTintKinds, dark))
+    })
+  }, [blockTintKinds, dark])
 
   // Keep the editor in sync when the document is replaced from outside.
   useEffect(() => {

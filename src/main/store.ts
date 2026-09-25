@@ -20,6 +20,14 @@ export interface Settings {
   aiModel: string
   /** Show a diff for approval before AI changes touch the document. */
   aiReviewChanges: boolean
+  /**
+   * Markdown blocks that get a background tint in the editor, so you can see
+   * where each one starts and ends. Empty array switches tinting off.
+   *
+   * Typed loosely here on purpose: this file runs in the main process and must
+   * not import from the renderer, where the BlockKind union is declared.
+   */
+  blockTints: string[]
 }
 
 const DEFAULTS: Settings = {
@@ -33,7 +41,8 @@ const DEFAULTS: Settings = {
   aiKeys: { anthropic: '', openai: '', gemini: '', assemblyai: '' },
   aiProvider: 'ollama',
   aiModel: '',
-  aiReviewChanges: true
+  aiReviewChanges: true,
+  blockTints: ['codeBlock', 'blockquote']
 }
 
 let cache: Settings | null = null
