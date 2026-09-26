@@ -15,15 +15,18 @@ if you need the detail behind any step.
 Already started. Tag `v1.1.0` is pushed, and GitHub Actions builds the
 `.appx` files on a Windows runner because that is where `makeappx.exe` lives.
 
-**The first run failed on a flaky test, not on your code.** Re-run it:
+**The run failed, and re-running will not help.** The Build workflow has
+failed on *every* run since 24 August 2026, long before this release. The last
+green build was `48fd88e1` on 20 August. Nobody noticed because no release was
+cut in between, and the separate `pages-build-deployment` workflow kept showing
+green in the same list.
 
-**<https://github.com/Narashiman-K/Markdown-Notes-windows/actions>**
+One assertion in the end-to-end smoke test fails on the runner and passes
+locally: 64 passed and 1 failed in CI, against 65 passed and 0 failed here.
+The `package` job never starts at all, because it depends on `test` — which is
+why no `.appx` files exist.
 
-Open the failed `v1.1.0` run → **Re-run failed jobs** (top right).
-
-> The same commit has both passed and failed in CI, so this is a coin flip
-> rather than a real failure. It is logged as a known problem to fix; for now
-> re-running is the answer, and it may take a second attempt.
+This has to be fixed before any Store package can be produced.
 
 When it goes green, the run attaches the packages to a release at
 **<https://github.com/Narashiman-K/Markdown-Notes-windows/releases>**.
