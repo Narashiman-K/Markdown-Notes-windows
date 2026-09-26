@@ -15,8 +15,6 @@ const dom = new JSDOM('')
 ;(globalThis as { document?: unknown }).document = dom.window.document
 ;(globalThis as { DOMParser?: unknown }).DOMParser = dom.window.DOMParser
 
-// The only lines that differ from the web app's copy: the renderer sources
-// live a couple of directories deeper here.
 const { promoteHeaderRows, fragmentForTests } = await import('../src/renderer/src/lib/smartPaste')
 const { htmlToMarkdown } = await import('../src/renderer/src/lib/convert/html')
 
@@ -85,6 +83,34 @@ describe('spreadsheet paste', () => {
 
     expect(md).toContain('| Date Found | [project44](https://example.com) |')
     expect(md).toContain('| 04-Sep-2026 | Broadridge |')
+  })
+
+  it('picks the real header when the sheet opens with a merged title', () => {
+    /*
+     * The shape of an actual formatted spreadsheet: a merged title spanning
+     * every column, a merged subtitle, a blank spacer row, then the headings.
+     * Promoting the first row declared the table one column wide and every
+     * row below was truncated to one.
+     */
+    const md = convert(`<table>
+<tr><td colspan="3">Job Site Registration and Search Plan</td></tr>
+<tr><td colspan="3">Register only where the target roles are likely to exist.</td></tr>
+<tr><td></td><td></td><td></td></tr>
+<tr><td>Priority</td><td>Site</td><td>Purpose</td></tr>
+<tr><td>P1</td><td>LinkedIn</td><td>Discovery</td></tr>
+<tr><td>P2</td><td>Indeed</td><td>Broad search</td></tr>
+</table>`)
+
+    expect(md).toContain('| Priority | Site | Purpose |')
+    expect(md).toContain('| P1 | LinkedIn | Discovery |')
+    expect(md).toContain('| P2 | Indeed | Broad search |')
+
+    // The title and subtitle are kept, as text above the table.
+    expect(md).toContain('Job Site Registration and Search Plan')
+    expect(md).toContain('Register only where the target roles are likely to exist.')
+
+    // The blank spacer row must not survive as a row of empty pipes.
+    expect(md).not.toMatch(/\|\s*\|\s*\|\s*\|\s*\n\|\s*\|\s*\|\s*\|/)
   })
 
   it('still trims a web page copy to the selected part', () => {

@@ -87,19 +87,58 @@ export function promoteHeaderRows(html: string): string {
   for (const table of Array.from(doc.querySelectorAll('table'))) {
     if (table.querySelector('thead')) continue
 
-    const first = table.querySelector('tr')
-    if (!first || first.children.length === 0) continue
+    /*
+     * Spacer rows are dropped first.
+     *
+     * Sheets are full of blank rows used for spacing, and a row of empty
+     * cells becomes a row of empty pipes that no reader gains anything from.
+     */
+    for (const row of Array.from(table.rows)) {
+      if (Array.from(row.cells).every((cell) => !cell.textContent?.trim())) row.remove()
+    }
+
+    const rows = Array.from(table.rows)
+    if (rows.length === 0) continue
+
+    /*
+     * The header is the first row as wide as the table, not simply the first.
+     *
+     * Real spreadsheets open with a merged title cell and often a subtitle
+     * under it, each spanning every column. Promoting the first row made the
+     * table one column wide, so every twelve-cell row below it was truncated
+     * to one — which looked far more broken than the original problem.
+     */
+    const width = Math.max(...rows.map((row) => row.cells.length))
+    const headerIndex = rows.findIndex((row) => row.cells.length === width)
+    const header = rows[headerIndex]
+    if (!header) continue
+
+    /*
+     * Rows above the header are titles and captions. They are lifted out as
+     * paragraphs above the table rather than dropped: they are usually what
+     * the sheet is called, and losing them silently would be worse than the
+     * layout being imperfect.
+     */
+    for (let i = 0; i < headerIndex; i++) {
+      const text = rows[i].textContent?.replace(/\s+/g, ' ').trim()
+      if (text) {
+        const paragraph = doc.createElement('p')
+        paragraph.textContent = text
+        table.parentNode?.insertBefore(paragraph, table)
+      }
+      rows[i].remove()
+    }
 
     const head = doc.createElement('thead')
-    const row = doc.createElement('tr')
-    for (const cell of Array.from(first.children)) {
+    const headRow = doc.createElement('tr')
+    for (const cell of Array.from(header.cells)) {
       const th = doc.createElement('th')
       th.innerHTML = cell.innerHTML
-      row.appendChild(th)
+      headRow.appendChild(th)
     }
-    head.appendChild(row)
+    head.appendChild(headRow)
 
-    first.remove()
+    header.remove()
     table.insertBefore(head, table.firstChild)
   }
 
