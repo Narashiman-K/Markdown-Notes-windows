@@ -64,8 +64,6 @@ export default function LivePreview({
 }: Props): React.JSX.Element {
   const scrollerRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLElement>(null)
-  const indexRef = useRef<{ text: string; entries: TextNodeIndexEntry[] } | null>(null)
-  const mapRef = useRef<Int32Array | null>(null)
   const [bar, setBar] = useState<{ x: number; y: number; flip: boolean } | null>(null)
 
   const html = useMemo(() => renderMarkdown(source, { sourceLines: true }), [source])
@@ -80,37 +78,52 @@ export default function LivePreview({
   }, [onElements])
 
   /*
-   * Re-index whenever the rendered output changes.
+   * The index and the source map are built at the moment they are used, not
+   * cached and refreshed.
    *
-   * Every keystroke in the editor re-renders this pane, and the character
-   * offsets of every text node move with it. A stale index maps a selection to
-   * the wrong part of the document, which would corrupt the file rather than
-   * merely misbehave — worth rebuilding eagerly.
+   * Caching them looked obviously right: the pane re-renders on every
+   * keystroke, so rebuilding eagerly in an effect seemed like the careful
+   * option. It is the dangerous one. Every text node is replaced when React
+   * rewrites the pane's HTML, so a cached index holds references to detached
+   * nodes and offsets into text that is no longer there. Offsets past the end
+   * of the stale text clamp to the end of the document, which produced a
+   * one-character range there — formatting applied to the last character of
+   * the file rather than to what was selected, silently and destructively.
+   *
+   * There is no cheap way to be certain a cache is current, and no way at all
+   * to notice when it is not. Building it on demand costs a walk of the
+   * rendered text once per formatting action, which is nothing, and cannot be
+   * stale by construction.
    */
-  useEffect(() => {
-    const body = bodyRef.current
-    if (!body) return
-    indexRef.current = indexTextNodes(body)
-    mapRef.current = buildSourceMap(source, indexRef.current.text)
-    setBar(null)
-  }, [html, source, bodyRef])
-
   const rangeFromSelection = useCallback((): [number, number] | null => {
     const selection = window.getSelection()
     const body = bodyRef.current
-    const index = indexRef.current
-    const map = mapRef.current
-    if (!selection || selection.isCollapsed || !body || !index || !map) return null
+    if (!selection || selection.isCollapsed || !body) return null
 
     const range = selection.getRangeAt(0)
     if (!body.contains(range.commonAncestorContainer)) return null
+
+    const index = indexTextNodes(body)
+    const map = buildSourceMap(source, index.text)
 
     const start = domToOffset(index.entries, range.startContainer, range.startOffset)
     const end = domToOffset(index.entries, range.endContainer, range.endOffset)
     if (start === null || end === null || end <= start) return null
 
+    /*
+     * Refuse a mapping that lands outside the text it was built from. That is
+     * what a mismatch looks like, and applying it would edit the wrong part
+     * of the document; doing nothing is the only safe response.
+     */
+    if (start >= index.text.length || end > index.text.length) return null
+
     return toSourceRange(map, start, end)
-  }, [bodyRef])
+  }, [source])
+
+  // Dismiss the bar whenever the rendered content changes underneath it.
+  useEffect(() => {
+    setBar(null)
+  }, [html])
 
   /*
    * Show the bar above the selection, or below it when there is no room.

@@ -178,7 +178,13 @@ export default function App(): React.JSX.Element {
                 ? wrapSelection(content, from, to, '[', '](url)')
                 : prefixLines(content, from, to, '## ')
 
-      editorRef.current?.applyEdit(edit)
+      /*
+       * The caret is collapsed to the end of the change rather than left
+       * selecting it. The editor shows its own floating toolbar whenever a
+       * range is selected, so selecting the result meant a second toolbar
+       * appeared in the other pane the instant you used the first one.
+       */
+      editorRef.current?.applyEdit({ ...edit, selectionStart: edit.selectionEnd })
       updateContent(edit.text)
     },
     [content, updateContent]
