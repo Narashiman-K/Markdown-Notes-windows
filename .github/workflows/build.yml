@@ -70,6 +70,12 @@ jobs:
   package:
     needs: test
     runs-on: windows-latest
+    # Creating a release needs write access to repository contents. The default
+    # token is read-only, so without this the packages build correctly and then
+    # the attach step fails at the last moment — which is a confusing way to
+    # lose a release, since everything up to that point is green.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
 
