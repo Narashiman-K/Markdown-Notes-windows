@@ -88,8 +88,19 @@ export default function App(): React.JSX.Element {
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY)
   const [reviewChanges, setReviewChanges] = useState(true)
   const [blockTints, setBlockTints] = useState<BlockKind[]>(() => [...DEFAULT_BLOCK_TINTS])
-  const livePreviewRef = useRef<HTMLDivElement>(null)
-  const livePreviewBodyRef = useRef<HTMLElement>(null)
+  /*
+   * State, not refs.
+   *
+   * A ref object keeps the same identity forever, so an effect depending on
+   * one never re-runs when the elements inside are swapped — which happens on
+   * every remount and every hot reload. Scroll syncing stayed bound to
+   * detached nodes and quietly stopped working. Holding the elements in state
+   * makes the effect re-link whenever they actually change.
+   */
+  const [previewEls, setPreviewEls] = useState<{
+    scroller: HTMLDivElement
+    body: HTMLElement
+  } | null>(null)
   const [pendingDiff, setPendingDiff] = useState<{ next: string; label: string } | null>(null)
   const [dialog, setDialog] = useState<
     | { kind: 'newComment'; range: [number, number] }
@@ -113,11 +124,10 @@ export default function App(): React.JSX.Element {
    * otherwise point at a destroyed CodeMirror.
    */
   useEffect(() => {
-    if (mode !== 'edit') return
-    const scroller = livePreviewRef.current
-    const body = livePreviewBodyRef.current
+    if (mode !== 'edit' || !previewEls) return
+    const { scroller, body } = previewEls
     const editor = editorRef.current?.scrollTarget()
-    if (!scroller || !body || !editor) return
+    if (!editor) return
 
     // Below 1060px the stylesheet hides the preview — there is no room for
     // both panes — and a hidden element measures as zero, so linking to it
@@ -125,7 +135,7 @@ export default function App(): React.JSX.Element {
     if (scroller.offsetParent === null) return
 
     return linkScrollers(editor, previewScrollTarget(scroller, body))
-  }, [mode, dark, zoom])
+  }, [mode, dark, zoom, previewEls])
   const headings = useMemo(() => extractHeadings(content), [content])
   const annotations = useMemo(() => listAnnotations(content), [content])
   const stats = useMemo(() => documentStats(content), [content])
@@ -924,8 +934,7 @@ export default function App(): React.JSX.Element {
                 source={content}
                 zoom={zoom}
                 onFormat={formatFromPreview}
-                scrollerRef={livePreviewRef}
-                bodyRef={livePreviewBodyRef}
+                onElements={setPreviewEls}
               />
             </div>
           )}

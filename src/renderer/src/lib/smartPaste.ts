@@ -37,6 +37,55 @@ function fragment(html: string): string {
   return html
 }
 
+/**
+ * Gives heading-less tables a heading row, so spreadsheets survive.
+ *
+ * The GFM rules only recognise a table that already has a `<thead>`; anything
+ * else is left as raw HTML and collapses into a paragraph of run-together
+ * text. Excel and Google Sheets both emit plain `<tr><td>` with no heading
+ * row, which made pasting a block of cells — the single most obvious reason to
+ * want this feature — produce the worst result of any source.
+ *
+ * Promoting the first row is what a reader does anyway when looking at a
+ * spreadsheet selection. It is wrong when someone copies cells from the middle
+ * of a sheet, which costs them one row; leaving it alone cost them the entire
+ * table, so this is the better failure.
+ *
+ * Done here rather than in the shared `html.ts` deliberately. That file is
+ * kept byte-identical across five projects and decides how every converted
+ * document looks; a paste-time convenience has no business changing what a
+ * .docx turns into.
+ */
+function promoteHeaderRows(html: string): string {
+  let doc: Document
+  try {
+    doc = new DOMParser().parseFromString(html, 'text/html')
+  } catch {
+    return html
+  }
+
+  for (const table of Array.from(doc.querySelectorAll('table'))) {
+    if (table.querySelector('thead')) continue
+
+    const first = table.querySelector('tr')
+    if (!first || first.children.length === 0) continue
+
+    const head = doc.createElement('thead')
+    const row = doc.createElement('tr')
+    for (const cell of Array.from(first.children)) {
+      const th = doc.createElement('th')
+      th.innerHTML = cell.innerHTML
+      row.appendChild(th)
+    }
+    head.appendChild(row)
+
+    first.remove()
+    table.insertBefore(head, table.firstChild)
+  }
+
+  return doc.body.innerHTML
+}
+
 /** The chooser currently on screen, if any. There is only ever one. */
 let open: { dismiss: () => void } | null = null
 
@@ -138,7 +187,7 @@ export function smartPaste(): Extension {
 
       let markdown: string
       try {
-        markdown = htmlToMarkdown(fragment(html)).trim()
+        markdown = htmlToMarkdown(promoteHeaderRows(fragment(html))).trim()
       } catch {
         // A clipboard we cannot parse should paste normally, not raise an
         // error over something as routine as Ctrl+V.

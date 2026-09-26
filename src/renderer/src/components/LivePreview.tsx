@@ -35,10 +35,17 @@ interface Props {
   zoom: number
   /** Applies `action` to the given source character range. */
   onFormat: (action: PreviewFormat, range: [number, number]) => void
-  /** The scrolling element, handed up so scroll syncing can attach to it. */
-  scrollerRef: RefObject<HTMLDivElement>
-  /** The rendered content element, used for the data-line anchors. */
-  bodyRef: RefObject<HTMLElement>
+  /**
+   * Reports the two elements scroll syncing needs, and reports null when they
+   * go away.
+   *
+   * A callback rather than refs handed down. A ref object never changes
+   * identity, so a parent effect holding one has no way to know the elements
+   * inside it were swapped — which happens on every remount and on every hot
+   * reload, leaving the listeners attached to detached nodes and scroll
+   * syncing silently dead. Telling the parent means it can re-link.
+   */
+  onElements: (elements: { scroller: HTMLDivElement; body: HTMLElement } | null) => void
 }
 
 const BUTTONS: Array<{ action: PreviewFormat; label: string; title: string }> = [
@@ -53,14 +60,24 @@ export default function LivePreview({
   source,
   zoom,
   onFormat,
-  scrollerRef,
-  bodyRef
+  onElements
 }: Props): React.JSX.Element {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const bodyRef = useRef<HTMLElement>(null)
   const indexRef = useRef<{ text: string; entries: TextNodeIndexEntry[] } | null>(null)
   const mapRef = useRef<Int32Array | null>(null)
   const [bar, setBar] = useState<{ x: number; y: number; flip: boolean } | null>(null)
 
   const html = useMemo(() => renderMarkdown(source, { sourceLines: true }), [source])
+
+  // Announce the elements once they exist, and withdraw them on unmount so no
+  // listener is left attached to a node that is no longer on the page.
+  useEffect(() => {
+    const scroller = scrollerRef.current
+    const body = bodyRef.current
+    if (scroller && body) onElements({ scroller, body })
+    return () => onElements(null)
+  }, [onElements])
 
   /*
    * Re-index whenever the rendered output changes.
@@ -142,7 +159,7 @@ export default function LivePreview({
   return (
     <div className="live-preview" ref={scrollerRef}>
       <article
-        ref={bodyRef as RefObject<HTMLElement> as React.Ref<HTMLElement>}
+        ref={bodyRef as React.Ref<HTMLElement>}
         className="markdown-body"
         style={{ fontSize: `${zoom * 15}px` }}
         dangerouslySetInnerHTML={{ __html: html }}
