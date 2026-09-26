@@ -13,7 +13,7 @@ import {
   highlightSpecialChars
 } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab, undo as cmUndo, redo as cmRedo } from '@codemirror/commands'
-import { searchKeymap, highlightSelectionMatches, search } from '@codemirror/search'
+import { searchKeymap, highlightSelectionMatches, search, openSearchPanel } from '@codemirror/search'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, HighlightStyle } from '@codemirror/language'
@@ -33,6 +33,8 @@ export interface EditorHandle {
   redo: () => boolean
   /** Scroll-sync handle, or null before the view exists. */
   scrollTarget: () => ScrollSyncTarget | null
+  /** Opens CodeMirror's find-and-replace panel. */
+  openSearch: () => void
 }
 
 interface Props {
@@ -228,33 +230,61 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
      * The scroll-sync view of this editor.
      *
      * Lines are reported zero-based to match `data-line` in the rendered HTML;
-     * CodeMirror counts from one, hence the adjustments. `blockAtHeight` and
-     * `lineBlockAt` are used rather than multiplying by a line height, because
-     * wrapped lines and the tinted blocks make rows different heights — a
-     * uniform-height assumption drifts badly in exactly the long documents
-     * this feature exists for.
+     * CodeMirror counts from one, hence the adjustments. Line blocks are used
+     * rather than multiplying by a line height, because wrapped lines and the
+     * tinted blocks make rows different heights, and a uniform-height
+     * assumption drifts badly in exactly the long documents this exists for.
+     *
+     * The coordinate conversion is the part that has to be right. CodeMirror's
+     * block `top` values are measured from the top of the *document*, while
+     * `scrollDOM.scrollTop` is measured from the top of the *scroller* — and
+     * the two differ by the scroller's padding, which here is 12px at the top
+     * and 40vh at the bottom. Treating them as the same number, as the first
+     * version did, offsets every lookup by that padding and the panes never
+     * line up. `view.documentTop` is the document's current screen position,
+     * so going through screen coordinates keeps the two spaces honest without
+     * hard-coding anything about the padding.
      */
     scrollTarget: (): ScrollSyncTarget | null => {
       const view = viewRef.current
       if (!view) return null
 
+      /** Height within the document that currently sits at the scroller's top edge. */
+      const heightAtTop = (): number =>
+        view.scrollDOM.getBoundingClientRect().top - view.documentTop
+
       return {
         scroller: view.scrollDOM,
         topLine: () => {
-          const top = view.scrollDOM.scrollTop
-          const block = view.lineBlockAtHeight(top)
+          const height = heightAtTop()
+          const block = view.lineBlockAtHeight(height)
           const line = view.state.doc.lineAt(block.from)
           // Interpolate within the block so a half-scrolled paragraph maps to
           // a fractional line rather than snapping to its first.
-          const within = block.height > 0 ? (top - block.top) / block.height : 0
+          const within = block.height > 0 ? (height - block.top) / block.height : 0
           return line.number - 1 + Math.min(1, Math.max(0, within))
         },
         scrollToLine: (line: number) => {
           const clamped = Math.max(1, Math.min(Math.floor(line) + 1, view.state.doc.lines))
           const block = view.lineBlockAt(view.state.doc.line(clamped).from)
-          view.scrollDOM.scrollTop = block.top + (line - Math.floor(line)) * block.height
+          const wanted = block.top + (line - Math.floor(line)) * block.height
+          view.scrollDOM.scrollTop += wanted - heightAtTop()
         }
       }
+    },
+
+    /**
+     * Opens CodeMirror's find-and-replace panel.
+     *
+     * Ctrl+F always worked because CodeMirror's own keymap handles it inside
+     * the editor. The Edit menu had no way to reach it and merely focused the
+     * editor, so the menu item looked broken while the shortcut worked.
+     */
+    openSearch: () => {
+      const view = viewRef.current
+      if (!view) return
+      view.focus()
+      openSearchPanel(view)
     },
     gotoLine: (line: number) => {
       const view = viewRef.current

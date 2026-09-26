@@ -488,8 +488,13 @@ export default function App(): React.JSX.Element {
           return
         }
         case 'edit:find':
+          // Two different find experiences, because the two modes are two
+          // different things: the reader searches rendered text, the editor
+          // searches source and can replace in it. Previously the edit branch
+          // only focused the editor, so the menu item did nothing visible
+          // while Ctrl+F worked — CodeMirror's own keymap was handling that.
           if (mode === 'view') setFindOpen(true)
-          else editorRef.current?.focus()
+          else editorRef.current?.openSearch()
           return
 
         case 'view:mode:view':

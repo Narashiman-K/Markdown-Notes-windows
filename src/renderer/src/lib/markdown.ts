@@ -59,6 +59,26 @@ md.core.ruler.push('suprasuta_source_lines', (state) => {
   }
 })
 
+/*
+ * Fences need the attribute putting back by hand.
+ *
+ * When the `highlight` option returns a string that already starts with
+ * `<pre`, markdown-it uses it verbatim and never calls renderAttrs — so the
+ * data-line set above is silently dropped for exactly the tallest element on
+ * the page. A code block with no anchor is the worst case for scroll syncing,
+ * because the panes can be a whole screen apart before the next anchor
+ * appears. Indented code blocks are unaffected; their renderer does call
+ * renderAttrs.
+ */
+const defaultFence = md.renderer.rules.fence
+md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+  const html = defaultFence
+    ? defaultFence(tokens, idx, options, env, self)
+    : self.renderToken(tokens, idx, options)
+  const line = tokens[idx].attrGet('data-line')
+  return line ? html.replace(/^<pre/, `<pre data-line="${line}"`) : html
+}
+
 export interface Heading {
   level: number
   text: string
