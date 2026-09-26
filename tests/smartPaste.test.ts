@@ -17,10 +17,12 @@ const dom = new JSDOM('')
 
 // The only lines that differ from the web app's copy: the renderer sources
 // live a couple of directories deeper here.
-const { promoteHeaderRows } = await import('../src/renderer/src/lib/smartPaste')
+const { promoteHeaderRows, fragmentForTests } = await import('../src/renderer/src/lib/smartPaste')
 const { htmlToMarkdown } = await import('../src/renderer/src/lib/convert/html')
 
-const convert = (html: string): string => htmlToMarkdown(promoteHeaderRows(html)).trim()
+/** The whole paste pipeline, in the order smartPaste runs it. */
+const convert = (html: string): string =>
+  htmlToMarkdown(promoteHeaderRows(fragmentForTests(html))).trim()
 
 const SHEETS = `<meta charset="utf-8"><google-sheets-html-origin>
 <style type="text/css"><!--td {border: 1px solid #ccc;}--></style>
@@ -62,6 +64,37 @@ describe('spreadsheet paste', () => {
     expect(md).toContain('| 1 | 2 |')
     // Promotion must not steal a data row from a table that was already fine.
     expect(md).not.toContain('| 1 | 2 |\n| --- |')
+  })
+
+  it('survives Excel putting its fragment markers inside the table', () => {
+    /*
+     * The shape that actually broke this. Excel wraps the markers around the
+     * rows rather than around the table, so trimming to them leaves bare
+     * `<tr>` elements. A `<tr>` outside a table is invalid and the parser
+     * discards it, keeping only the text and links — which looked like a
+     * successful conversion while producing one run-on paragraph.
+     */
+    const md = convert(`Version:1.0
+<html xmlns:o="urn:schemas-microsoft-com:office:office"><body>
+<table border=0 cellpadding=0 cellspacing=0><col width=100><col width=100>
+<!--StartFragment-->
+<tr height=20><td>Date Found</td><td><a href="https://example.com">project44</a></td></tr>
+<tr height=20><td>04-Sep-2026</td><td>Broadridge</td></tr>
+<!--EndFragment-->
+</table></body></html>`)
+
+    expect(md).toContain('| Date Found | [project44](https://example.com) |')
+    expect(md).toContain('| 04-Sep-2026 | Broadridge |')
+  })
+
+  it('still trims a web page copy to the selected part', () => {
+    // The reason fragment trimming exists: browsers put the markers around
+    // exactly what was highlighted, and without honouring them a copy drags
+    // in the surrounding navigation.
+    const md = convert(
+      '<body><nav>Home About</nav><!--StartFragment--><p>Only <em>this</em>.</p><!--EndFragment--><footer>Legal</footer></body>'
+    )
+    expect(md).toBe('Only *this*.')
   })
 
   it('leaves prose untouched', () => {

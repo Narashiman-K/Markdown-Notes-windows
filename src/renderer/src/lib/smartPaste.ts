@@ -33,8 +33,26 @@ import { htmlToMarkdown } from './convert/html'
 function fragment(html: string): string {
   const open = html.indexOf('<!--StartFragment-->')
   const close = html.indexOf('<!--EndFragment-->')
-  if (open !== -1 && close > open) return html.slice(open + 20, close)
-  return html
+  if (open === -1 || close <= open) return html
+
+  const slice = html.slice(open + '<!--StartFragment-->'.length, close)
+
+  /*
+   * Refuse a slice that orphans rows or list items.
+   *
+   * Excel puts the markers *inside* the table, wrapped around the rows, so
+   * slicing to them yields bare `<tr>` elements with no table around them.
+   * A `<tr>` outside a table is invalid, and the parser discards it silently,
+   * keeping only the text and links inside — which turned a copied
+   * spreadsheet into one run-on paragraph while looking, from the code's
+   * point of view, like a perfectly successful conversion.
+   *
+   * Keeping the whole document costs a little surrounding chrome in the rare
+   * page that has some; losing the table costs the entire point of the
+   * feature.
+   */
+  const orphaned = /<(tr|td|th|li|dt|dd)\b/i.test(slice) && !/<(table|ul|ol|dl)\b/i.test(slice)
+  return orphaned ? html : slice
 }
 
 /**
@@ -56,6 +74,8 @@ function fragment(html: string): string {
  * document looks; a paste-time convenience has no business changing what a
  * .docx turns into.
  */
+export { fragment as fragmentForTests }
+
 export function promoteHeaderRows(html: string): string {
   let doc: Document
   try {
