@@ -16,6 +16,28 @@ export function buildSourceMap(source: string, rendered: string, lookahead = 600
 
   for (let ri = 0; ri < rendered.length; ri++) {
     const ch = rendered[ri]
+
+    /*
+     * Whitespace is recorded but never searched for, and never advances the
+     * cursor.
+     *
+     * Matching it was what broke this. The renderer puts a newline between
+     * two table cells whose source reads `| Site | Purpose |`, so searching
+     * forward for that newline jumped the cursor to the end of the line,
+     * past `Purpose` — which then could not be found at all, because the
+     * walk only ever moves forward. From the first table or code block
+     * onward every offset was wrong, and by the end of a document the cursor
+     * had run so far ahead that selections mapped to nothing.
+     *
+     * The visible characters are what anchor the alignment; the spacing
+     * between them differs by construction, since stripping markup is most
+     * of what rendering does.
+     */
+    if (/\s/.test(ch)) {
+      map[ri] = si
+      continue
+    }
+
     const limit = Math.min(source.length, si + lookahead)
     let found = -1
     for (let k = si; k < limit; k++) {
@@ -73,6 +95,45 @@ export function indexTextNodes(root: HTMLElement): { text: string; entries: Text
     node = walker.nextNode() as Text | null
   }
   return { text, entries }
+}
+
+/**
+ * Converts a DOM Range into start and end offsets within `root`'s text.
+ *
+ * Measured by asking the browser how much text lies before each boundary,
+ * rather than by looking the boundary's node up in an index. That matters
+ * because a Range boundary is frequently an *element* with a child index
+ * rather than a position inside a text node — which is what you get selecting
+ * to the end of a paragraph, double-clicking a word, or selecting anything
+ * inside a table cell or a highlighted code block.
+ *
+ * Resolving an element boundary by finding the nearest text node is right for
+ * a start and wrong for an end: the end sits *after* the preceding node, not
+ * at the start of the following one. That put closing markers several
+ * characters early, so emboldening a phrase produced `**Select **any text`,
+ * and in deeply nested markup it missed badly enough to land at the end of
+ * the document.
+ *
+ * The offsets are into the concatenation of every text node under `root`,
+ * which is `root.textContent` — so build the source map from that same string
+ * and the two are guaranteed to agree.
+ */
+export function rangeToOffsets(root: HTMLElement, range: Range): [number, number] | null {
+  if (!root.contains(range.commonAncestorContainer)) return null
+
+  const probe = root.ownerDocument.createRange()
+  probe.selectNodeContents(root)
+
+  try {
+    probe.setEnd(range.startContainer, range.startOffset)
+    const start = probe.toString().length
+    probe.setEnd(range.endContainer, range.endOffset)
+    const end = probe.toString().length
+    return end > start ? [start, end] : null
+  } catch {
+    // setEnd throws if the boundary is not inside root after all.
+    return null
+  }
 }
 
 /** Converts a DOM position into a global offset within the indexed text. */

@@ -20,13 +20,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { renderMarkdown } from '../lib/markdown'
-import {
-  buildSourceMap,
-  indexTextNodes,
-  domToOffset,
-  toSourceRange,
-  type TextNodeIndexEntry
-} from '../lib/align'
+import { buildSourceMap, rangeToOffsets, toSourceRange } from '../lib/align'
 
 export type PreviewFormat = 'bold' | 'italic' | 'heading' | 'link' | 'code'
 
@@ -100,24 +94,22 @@ export default function LivePreview({
     const body = bodyRef.current
     if (!selection || selection.isCollapsed || !body) return null
 
-    const range = selection.getRangeAt(0)
-    if (!body.contains(range.commonAncestorContainer)) return null
+    const offsets = rangeToOffsets(body, selection.getRangeAt(0))
+    if (!offsets) return null
 
-    const index = indexTextNodes(body)
-    const map = buildSourceMap(source, index.text)
-
-    const start = domToOffset(index.entries, range.startContainer, range.startOffset)
-    const end = domToOffset(index.entries, range.endContainer, range.endOffset)
-    if (start === null || end === null || end <= start) return null
+    const [start, end] = offsets
 
     /*
-     * Refuse a mapping that lands outside the text it was built from. That is
-     * what a mismatch looks like, and applying it would edit the wrong part
-     * of the document; doing nothing is the only safe response.
+     * The map is built from the same string the offsets were measured
+     * against. Using `textContent` on both sides is the whole point: any
+     * other definition of "the rendered text" would drift from what the
+     * browser counted, and a drift of a few characters is what put closing
+     * markers in the middle of words.
      */
-    if (start >= index.text.length || end > index.text.length) return null
+    const rendered = body.textContent ?? ''
+    if (end > rendered.length) return null
 
-    return toSourceRange(map, start, end)
+    return toSourceRange(buildSourceMap(source, rendered), start, end)
   }, [source])
 
   // Dismiss the bar whenever the rendered content changes underneath it.
