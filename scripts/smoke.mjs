@@ -3,7 +3,7 @@
  * readable summary. Usage: npm run build && npm run smoke
  */
 import { spawnSync } from 'node:child_process'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
@@ -15,6 +15,17 @@ const resultFile = join(root, 'out', 'smoke', 'result.json')
 // directly avoids a shell, which would mangle paths containing spaces.
 const require = createRequire(pathToFileURL(join(root, 'package.json')))
 const electron = require('electron')
+
+/*
+ * The previous run's results are deleted before starting.
+ *
+ * This script only checked that the file existed, so a run where the app
+ * crashed, or never reached the end, cheerfully reported the last successful
+ * run instead — a green light for a build that did not happen. That is worse
+ * than a failure, and it is why this suite appeared to pass locally while
+ * failing in CI on the very same commit.
+ */
+rmSync(resultFile, { force: true })
 
 const run = spawnSync(electron, ['.'], {
   cwd: root,

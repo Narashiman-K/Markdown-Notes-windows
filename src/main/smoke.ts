@@ -216,8 +216,23 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
     check('about shows author', aboutText.includes('Narashiman Krishnamurthy'), aboutText.slice(0, 60))
     check('about shows licence', aboutText.includes('personal use') && aboutText.includes('commercial'))
     check('about shows review request', aboutText.includes('5 star'))
-    const linkedIn = await js<string>(`document.querySelector('.about-modal a')?.getAttribute('href') || ''`)
-    check('about links to LinkedIn', linkedIn === 'https://www.linkedin.com/in/narashimank/', linkedIn)
+    /*
+     * Every link in the dialog, not just the first one.
+     *
+     * This asserted on `querySelector('.about-modal a')` — whichever anchor
+     * happened to come first. Adding the Store review link above the author
+     * link therefore broke it, and the build stayed red for a month over a
+     * link that was working perfectly. What matters is that the author link
+     * is there, not where it sits.
+     */
+    const aboutLinks = await js<string[]>(
+      `[...document.querySelectorAll('.about-modal a')].map((a) => a.getAttribute('href') || '')`
+    )
+    check(
+      'about links to LinkedIn',
+      aboutLinks.includes('https://www.linkedin.com/in/narashimank/'),
+      aboutLinks.join(' | ')
+    )
     const logoOk = await js<boolean>(`(() => { const i = document.querySelector('.about-logo'); return !!i && i.complete && i.naturalWidth > 0 })()`)
     check('about logo renders', logoOk)
 
