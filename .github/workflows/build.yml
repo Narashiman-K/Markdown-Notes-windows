@@ -54,12 +54,17 @@ jobs:
         env:
           MARKNOTE_SMOKE: '1'
 
-      - name: Upload smoke screenshots
+      # result.json goes up alongside the screenshots. It holds every check
+      # with its recorded detail, which is what you actually need to diagnose
+      # a failure, and it is far easier to read than scrolling a web log.
+      - name: Upload smoke results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: smoke-screenshots
-          path: out/smoke/*.png
+          path: |
+            out/smoke/*.png
+            out/smoke/result.json
           if-no-files-found: ignore
 
   package:

@@ -32,4 +32,25 @@ for (const r of report.results) {
   console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.step}${r.detail ? `  (${r.detail})` : ''}`)
 }
 console.log(`\n${report.passed} passed, ${report.failed} failed`)
+
+/*
+ * Repeat the failures at the very end.
+ *
+ * Sixty-five lines of PASS scroll a single FAIL into the middle of a CI log,
+ * where a web view truncates it and the summary page does not show it at all.
+ * This cost a day of guessing at which assertion had broken, on a workflow
+ * that had been red for a month without anyone being able to see why. The
+ * last thing printed should be the thing that went wrong.
+ */
+const failures = report.results.filter((r) => !r.ok)
+if (failures.length) {
+  console.log('\n' + '='.repeat(64))
+  console.log(`FAILED (${failures.length}):`)
+  for (const f of failures) {
+    console.log(`  ${f.step}`)
+    console.log(`    got: ${f.detail ? JSON.stringify(f.detail) : '(no detail recorded)'}`)
+  }
+  console.log('='.repeat(64))
+}
+
 process.exit(report.failed > 0 || run.status !== 0 ? 1 : 0)
