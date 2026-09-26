@@ -173,6 +173,20 @@ button.tb.accent { color: var(--accent); font-weight: 700; }
   overflow: hidden;
   border-right: 1px solid var(--chrome-border);
 }
+
+/*
+ * Keep the find-and-replace panel underneath any in-page chrome.
+ *
+ * CodeMirror ships `.cm-panels` at z-index 300, which in the browser build put
+ * the search panel above the HTML menubar and covered every menu opened while
+ * it was showing. This build has native Electron menus, drawn by the operating
+ * system outside the web content, so it never hit that — the rule is here to
+ * keep the two stylesheets saying the same thing rather than to fix anything
+ * visible today.
+ */
+.cm-panels {
+  z-index: 50;
+}
 .live-preview {
   overflow: auto;
   background: var(--bg);
