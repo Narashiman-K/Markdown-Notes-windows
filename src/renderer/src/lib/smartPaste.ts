@@ -56,7 +56,7 @@ function fragment(html: string): string {
  * document looks; a paste-time convenience has no business changing what a
  * .docx turns into.
  */
-function promoteHeaderRows(html: string): string {
+export function promoteHeaderRows(html: string): string {
   let doc: Document
   try {
     doc = new DOMParser().parseFromString(html, 'text/html')

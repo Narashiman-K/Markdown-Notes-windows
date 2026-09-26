@@ -112,13 +112,23 @@ export default function LivePreview({
     return toSourceRange(map, start, end)
   }, [bodyRef])
 
-  // Show the bar above the selection, or below it when there is no room.
+  /*
+   * Show the bar above the selection, or below it when there is no room.
+   *
+   * These are viewport coordinates, not offsets within the pane. `.sel-toolbar`
+   * is position:fixed with translate(-50%, -100%), so x is the *centre* of the
+   * bar in page space. Measuring relative to the scrolling container instead
+   * put the bar exactly one pane-width to the left, which landed it on top of
+   * the editor and, near the window edge, mostly off screen.
+   *
+   * The clamp is what keeps it on screen at all: half the bar's width at each
+   * side, matching the reading view's toolbar so the two behave the same.
+   */
   useEffect(() => {
     function onSelectionChange(): void {
       const selection = window.getSelection()
       const body = bodyRef.current
-      const scroller = scrollerRef.current
-      if (!selection || selection.isCollapsed || !body || !scroller) {
+      if (!selection || selection.isCollapsed || !body) {
         setBar(null)
         return
       }
@@ -135,18 +145,21 @@ export default function LivePreview({
         return
       }
 
-      const host = scroller.getBoundingClientRect()
-      const flip = rect.top - host.top < 46
+      // Below the selection when it is close to the top, where the application
+      // chrome would otherwise cover the bar.
+      const flip = rect.top < 130
+      const half = 110
+
       setBar({
-        x: Math.max(8, Math.min(rect.left + rect.width / 2 - host.left, host.width - 8)),
-        y: flip ? rect.bottom - host.top + 8 : rect.top - host.top - 8,
+        x: Math.max(half, Math.min(rect.left + rect.width / 2, window.innerWidth - half)),
+        y: flip ? rect.bottom + 10 : rect.top - 8,
         flip
       })
     }
 
     document.addEventListener('selectionchange', onSelectionChange)
     return () => document.removeEventListener('selectionchange', onSelectionChange)
-  }, [bodyRef, scrollerRef])
+  }, [bodyRef])
 
   const apply = (action: PreviewFormat): void => {
     const range = rangeFromSelection()
