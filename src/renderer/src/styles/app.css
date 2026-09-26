@@ -187,6 +187,41 @@ button.tb.accent { color: var(--accent); font-weight: 700; }
 .cm-panels {
   z-index: 50;
 }
+
+/*
+ * The paste chooser, shown at the insertion point after a formatted paste.
+ *
+ * Positioned against .cm-editor, which CodeMirror already makes a containing
+ * block. Below the menubar in the stack for the same reason the find panel is:
+ * application chrome should never end up behind editor furniture.
+ */
+.paste-choice {
+  position: absolute;
+  z-index: 48;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 7px;
+  background: var(--chrome);
+  border: 1px solid var(--chrome-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.paste-choice-btn {
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.paste-choice-btn:hover { background: var(--hover); }
+.paste-choice-btn.is-active {
+  background: var(--accent);
+  color: #fff;
+}
 .live-preview {
   overflow: auto;
   background: var(--bg);
