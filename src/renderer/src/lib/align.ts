@@ -57,6 +57,27 @@ export function buildSourceMap(source: string, rendered: string, lookahead = 600
   return map
 }
 
+/**
+ * Shrinks a range so it holds no leading or trailing whitespace.
+ *
+ * Double-clicking a word selects the word *and its trailing space* in every
+ * browser, so a perfectly correct mapping still hands back "Press " rather
+ * than "Press". Wrapping that gives `**Press **`, and emphasis with a space
+ * against the marker is not emphasis at all — CommonMark requires the closing
+ * delimiter to follow a non-space character. The result renders as literal
+ * asterisks, and butted against the next markers it produced `****`.
+ *
+ * Returns null when nothing but whitespace is left, since there is no
+ * sensible way to embolden a space.
+ */
+export function trimRange(source: string, from: number, to: number): [number, number] | null {
+  let start = from
+  let end = to
+  while (start < end && /\s/.test(source[start])) start++
+  while (end > start && /\s/.test(source[end - 1])) end--
+  return end > start ? [start, end] : null
+}
+
 /** Inclusive-start / exclusive-end source range for a rendered range. */
 export function toSourceRange(map: Int32Array, start: number, end: number): [number, number] {
   const n = map.length - 1

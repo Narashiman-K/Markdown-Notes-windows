@@ -20,7 +20,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { renderMarkdown } from '../lib/markdown'
-import { buildSourceMap, rangeToOffsets, toSourceRange } from '../lib/align'
+import { buildSourceMap, rangeToOffsets, toSourceRange, trimRange } from '../lib/align'
 
 export type PreviewFormat = 'bold' | 'italic' | 'heading' | 'link' | 'code'
 
@@ -109,7 +109,11 @@ export default function LivePreview({
     const rendered = body.textContent ?? ''
     if (end > rendered.length) return null
 
-    return toSourceRange(buildSourceMap(source, rendered), start, end)
+    const [from, to] = toSourceRange(buildSourceMap(source, rendered), start, end)
+
+    // Double-clicking a word takes its trailing space too, and emphasis with
+    // a space against the marker is not emphasis.
+    return trimRange(source, from, to)
   }, [source])
 
   // Dismiss the bar whenever the rendered content changes underneath it.

@@ -19,7 +19,9 @@ const dom = new JSDOM('<!doctype html><html><body><article id="a"></article></bo
 ;(globalThis as { NodeFilter?: unknown }).NodeFilter = dom.window.NodeFilter
 
 const { renderMarkdown } = await import('../src/renderer/src/lib/markdown')
-const { buildSourceMap, rangeToOffsets, toSourceRange } = await import('../src/renderer/src/lib/align')
+const { buildSourceMap, rangeToOffsets, toSourceRange, trimRange } = await import(
+  '../src/renderer/src/lib/align'
+)
 
 const SOURCE = `## About the role
 
@@ -116,6 +118,24 @@ describe('rendered selection to source range', () => {
     // The end of the document is where every wrong mapping ended up, so a
     // correct mapping there is worth asserting explicitly.
     expect(mapWords('Closing paragraph')).toBe('Closing paragraph')
+  })
+
+  it('drops the trailing space a double-click includes', () => {
+    /*
+     * Every browser extends a double-click to the space after the word. The
+     * mapping is right, but wrapping "Press " gives `**Press **`, and
+     * CommonMark requires the closing delimiter to follow a non-space
+     * character, so it renders as literal asterisks. Butted against the
+     * emphasis that follows it produced `****Ctrl+O**`.
+     */
+    const line = 'Press Ctrl+O to open'
+    expect(trimRange(line, 0, 6)).toEqual([0, 5])
+    expect(line.slice(0, 5)).toBe('Press')
+  })
+
+  it('trims whitespace at both ends and refuses an empty result', () => {
+    expect(trimRange('a  word  b', 1, 9)).toEqual([3, 7])
+    expect(trimRange('a     b', 1, 6)).toBeNull()
   })
 
   it('refuses a range outside the pane', () => {
