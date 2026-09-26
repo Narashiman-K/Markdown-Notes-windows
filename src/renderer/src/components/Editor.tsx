@@ -48,6 +48,17 @@ interface Props {
   onFormat?: (action: string) => void
   /** Which block kinds get a background tint. Omit for the default pair. */
   blockTintKinds?: readonly BlockKind[]
+  /**
+   * Reports the scroll-sync handle each time the underlying view is built,
+   * and null when it goes away.
+   *
+   * Pulling the handle through a ref does not work: the ref never changes
+   * identity, so anything depending on it cannot tell that the CodeMirror
+   * instance behind it was replaced. The view is rebuilt whenever the theme
+   * or the zoom changes, and on every hot reload, and each time that happened
+   * scroll syncing stayed bound to the discarded instance and silently died.
+   */
+  onScrollTarget?: (target: ScrollSyncTarget | null) => void
 }
 
 /*
@@ -56,6 +67,48 @@ interface Props {
  * would discard the undo history every time someone toggled a colour.
  */
 const tintCompartment = new Compartment()
+
+/**
+ * The scroll-sync view of a CodeMirror instance.
+ *
+ * Lines are reported zero-based to match `data-line` in the rendered HTML;
+ * CodeMirror counts from one, hence the adjustments. Line blocks are used
+ * rather than multiplying by a line height, because wrapped lines and the
+ * tinted blocks make rows different heights, and a uniform-height assumption
+ * drifts badly in exactly the long documents this exists for.
+ *
+ * The coordinate conversion is the part that has to be right. CodeMirror's
+ * block `top` values are measured from the top of the *document*, while
+ * `scrollDOM.scrollTop` is measured from the top of the *scroller* — and the
+ * two differ by the scroller's padding, 12px at the top and 40vh at the
+ * bottom here. Treating them as the same number offsets every lookup by that
+ * padding and the panes never line up. `view.documentTop` is the document's
+ * current screen position, so going through screen coordinates keeps the two
+ * spaces honest without hard-coding anything about the padding.
+ */
+function makeScrollTarget(view: EditorView): ScrollSyncTarget {
+  /** Height within the document that currently sits at the scroller's top edge. */
+  const heightAtTop = (): number => view.scrollDOM.getBoundingClientRect().top - view.documentTop
+
+  return {
+    scroller: view.scrollDOM,
+    topLine: () => {
+      const height = heightAtTop()
+      const block = view.lineBlockAtHeight(height)
+      const line = view.state.doc.lineAt(block.from)
+      // Interpolate within the block so a half-scrolled paragraph maps to a
+      // fractional line rather than snapping to its first.
+      const within = block.height > 0 ? (height - block.top) / block.height : 0
+      return line.number - 1 + Math.min(1, Math.max(0, within))
+    },
+    scrollToLine: (line: number) => {
+      const clamped = Math.max(1, Math.min(Math.floor(line) + 1, view.state.doc.lines))
+      const block = view.lineBlockAt(view.state.doc.line(clamped).from)
+      const wanted = block.top + (line - Math.floor(line)) * block.height
+      view.scrollDOM.scrollTop += wanted - heightAtTop()
+    }
+  }
+}
 
 const mdHighlight = HighlightStyle.define([
   { tag: t.heading1, fontSize: '1.5em', fontWeight: '700' },
@@ -73,11 +126,23 @@ const mdHighlight = HighlightStyle.define([
 ])
 
 const Editor = forwardRef<EditorHandle, Props>(function Editor(
-  { value, dark, zoom, onChange, onCursor, onFormat, blockTintKinds = DEFAULT_BLOCK_TINTS },
+  {
+    value,
+    dark,
+    zoom,
+    onChange,
+    onCursor,
+    onFormat,
+    blockTintKinds = DEFAULT_BLOCK_TINTS,
+    onScrollTarget
+  },
   ref
 ) {
   const tintKindsRef = useRef(blockTintKinds)
   tintKindsRef.current = blockTintKinds
+  // Held in a ref so changing the callback cannot rebuild the editor.
+  const onScrollTargetRef = useRef(onScrollTarget)
+  onScrollTargetRef.current = onScrollTarget
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
@@ -178,7 +243,12 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
     viewRef.current = view
     view.focus()
 
+    // Announce the new instance, and withdraw it before it is destroyed, so
+    // nothing is left holding a handle to a view that no longer exists.
+    onScrollTargetRef.current?.(makeScrollTarget(view))
+
     return () => {
+      onScrollTargetRef.current?.(null)
       view.destroy()
       viewRef.current = null
     }
@@ -284,33 +354,8 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
      * so going through screen coordinates keeps the two spaces honest without
      * hard-coding anything about the padding.
      */
-    scrollTarget: (): ScrollSyncTarget | null => {
-      const view = viewRef.current
-      if (!view) return null
-
-      /** Height within the document that currently sits at the scroller's top edge. */
-      const heightAtTop = (): number =>
-        view.scrollDOM.getBoundingClientRect().top - view.documentTop
-
-      return {
-        scroller: view.scrollDOM,
-        topLine: () => {
-          const height = heightAtTop()
-          const block = view.lineBlockAtHeight(height)
-          const line = view.state.doc.lineAt(block.from)
-          // Interpolate within the block so a half-scrolled paragraph maps to
-          // a fractional line rather than snapping to its first.
-          const within = block.height > 0 ? (height - block.top) / block.height : 0
-          return line.number - 1 + Math.min(1, Math.max(0, within))
-        },
-        scrollToLine: (line: number) => {
-          const clamped = Math.max(1, Math.min(Math.floor(line) + 1, view.state.doc.lines))
-          const block = view.lineBlockAt(view.state.doc.line(clamped).from)
-          const wanted = block.top + (line - Math.floor(line)) * block.height
-          view.scrollDOM.scrollTop += wanted - heightAtTop()
-        }
-      }
-    },
+    scrollTarget: (): ScrollSyncTarget | null =>
+      viewRef.current ? makeScrollTarget(viewRef.current) : null,
 
     /**
      * Opens CodeMirror's find-and-replace panel.

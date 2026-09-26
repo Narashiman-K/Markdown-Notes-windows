@@ -32,7 +32,7 @@ import {
 } from './lib/annotations'
 import { wrapSelection, prefixLines, insertBlock, TABLE_SNIPPET, toFileUrl } from './lib/editing'
 import { DEFAULT_BLOCK_TINTS, type BlockKind } from './lib/blockTints'
-import { linkScrollers, previewScrollTarget } from './lib/syncScroll'
+import { linkScrollers, previewScrollTarget, type ScrollSyncTarget } from './lib/syncScroll'
 import LivePreview, { type PreviewFormat } from './components/LivePreview'
 import { ZOOM_LEVELS, type AnnotationType } from '../../shared/types'
 import markdownCss from './styles/markdown.css?inline'
@@ -101,6 +101,7 @@ export default function App(): React.JSX.Element {
     scroller: HTMLDivElement
     body: HTMLElement
   } | null>(null)
+  const [editorTarget, setEditorTarget] = useState<ScrollSyncTarget | null>(null)
   const [pendingDiff, setPendingDiff] = useState<{ next: string; label: string } | null>(null)
   const [dialog, setDialog] = useState<
     | { kind: 'newComment'; range: [number, number] }
@@ -124,18 +125,20 @@ export default function App(): React.JSX.Element {
    * otherwise point at a destroyed CodeMirror.
    */
   useEffect(() => {
-    if (mode !== 'edit' || !previewEls) return
+    if (mode !== 'edit' || !previewEls || !editorTarget) return
     const { scroller, body } = previewEls
-    const editor = editorRef.current?.scrollTarget()
-    if (!editor) return
 
     // Below 1060px the stylesheet hides the preview — there is no room for
     // both panes — and a hidden element measures as zero, so linking to it
     // would feed meaningless offsets back into the editor.
     if (scroller.offsetParent === null) return
 
-    return linkScrollers(editor, previewScrollTarget(scroller, body))
-  }, [mode, dark, zoom, previewEls])
+    return linkScrollers(editorTarget, previewScrollTarget(scroller, body))
+    // Both panes are dependencies now. Each reports itself when it is built
+    // and withdraws itself when it is torn down, so this re-links whenever
+    // either side is replaced rather than relying on a proxy like the theme
+    // or the zoom changing at the same time.
+  }, [mode, previewEls, editorTarget])
   const headings = useMemo(() => extractHeadings(content), [content])
   const annotations = useMemo(() => listAnnotations(content), [content])
   const stats = useMemo(() => documentStats(content), [content])
@@ -929,6 +932,7 @@ export default function App(): React.JSX.Element {
                 onCursor={(line, col) => setCursor({ line, col })}
                 onFormat={(action) => void actionRef.current(action)}
                 blockTintKinds={blockTints}
+                onScrollTarget={setEditorTarget}
               />
               <LivePreview
                 source={content}
