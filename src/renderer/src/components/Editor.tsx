@@ -212,12 +212,49 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
       const r = view.state.selection.main
       return { from: r.from, to: r.to }
     },
+    /*
+     * Applies a formatting edit as the smallest change that produces it.
+     *
+     * The edit helpers in lib/editing return the whole new document, and this
+     * used to hand that straight to CodeMirror as "replace everything". Doing
+     * that throws away every position in the document, so the editor scrolled
+     * back to the top after each use of the selection toolbar, undo collapsed
+     * the formatting and whatever preceded it into one step, and the block
+     * tints were rebuilt from scratch on every click.
+     *
+     * Trimming the common prefix and suffix recovers the actual edit. Wrapping
+     * a word in asterisks then dispatches as two tiny insertions instead of a
+     * few hundred kilobytes, and CodeMirror maps the scroll position and the
+     * selection across it the way it does for ordinary typing.
+     */
     applyEdit: (edit: TextEdit) => {
       const view = viewRef.current
       if (!view) return
+
+      const current = view.state.doc.toString()
+      const next = edit.text
+
+      let start = 0
+      const shortest = Math.min(current.length, next.length)
+      while (start < shortest && current[start] === next[start]) start++
+
+      let endCurrent = current.length
+      let endNext = next.length
+      while (endCurrent > start && endNext > start && current[endCurrent - 1] === next[endNext - 1]) {
+        endCurrent--
+        endNext--
+      }
+
       view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: edit.text },
+        // An unchanged document still needs the selection applying: some
+        // actions only move the caret.
+        changes:
+          current === next
+            ? undefined
+            : { from: start, to: endCurrent, insert: next.slice(start, endNext) },
         selection: { anchor: edit.selectionStart, head: edit.selectionEnd }
+        // No scrollIntoView. The text being formatted is on screen by
+        // definition, and asking to scroll to it is what moves the view.
       })
       view.focus()
     },

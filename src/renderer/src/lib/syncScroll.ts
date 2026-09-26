@@ -18,6 +18,11 @@ export interface ScrollSyncTarget {
   topLine(): number
   /** Put `line` at the top of the viewport. Must not move the caret or focus. */
   scrollToLine(line: number): void
+  /**
+   * True when this pane has just been rewritten and its scroll events are
+   * artefacts rather than the user moving.
+   */
+  settling?(): boolean
 }
 
 /**
@@ -58,8 +63,10 @@ export function previewScrollTarget(scroller: HTMLElement, content: HTMLElement)
    * stale is cheap; rebuilding happens at most once per scroll.
    */
   const observers: Array<MutationObserver | ResizeObserver> = []
+  let rewrittenAt = 0
   const invalidate = (): void => {
     stale = true
+    rewrittenAt = performance.now()
   }
 
   const mutation = new MutationObserver(invalidate)
@@ -109,6 +116,17 @@ export function previewScrollTarget(scroller: HTMLElement, content: HTMLElement)
     scrollToLine: (line) => {
       scroller.scrollTop = interpolate(line, 'line', 'top')
     },
+    /*
+     * The preview is re-rendered by replacing its inner HTML on every
+     * keystroke. While the new content is being laid out the container is
+     * briefly shorter than its own scroll position, so the browser clamps
+     * scrollTop towards zero and fires a scroll event. Following that event
+     * dragged the editor to the top of the document every time a formatting
+     * button was pressed, because that rewrites the whole preview at once.
+     *
+     * The window only has to outlast layout, not the typing.
+     */
+    settling: () => performance.now() - rewrittenAt < 150,
     // Exposed for teardown without widening the interface everyone else uses.
     ...({ dispose: () => observers.forEach((o) => o.disconnect()) } as object)
   } as ScrollSyncTarget & { dispose?: () => void }
@@ -127,7 +145,7 @@ export function linkScrollers(a: ScrollSyncTarget, b: ScrollSyncTarget): () => v
   let echo = false
 
   const follow = (from: ScrollSyncTarget, to: ScrollSyncTarget) => (): void => {
-    if (echo) return
+    if (echo || from.settling?.()) return
     echo = true
     to.scrollToLine(from.topLine())
     requestAnimationFrame(() => {
