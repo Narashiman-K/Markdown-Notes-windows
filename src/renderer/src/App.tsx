@@ -33,6 +33,7 @@ import {
 import { wrapSelection, prefixLines, insertBlock, TABLE_SNIPPET, toFileUrl } from './lib/editing'
 import { DEFAULT_BLOCK_TINTS, type BlockKind } from './lib/blockTints'
 import { linkScrollers, previewScrollTarget } from './lib/syncScroll'
+import LivePreview, { type PreviewFormat } from './components/LivePreview'
 import { ZOOM_LEVELS, type AnnotationType } from '../../shared/types'
 import markdownCss from './styles/markdown.css?inline'
 import hljsCss from 'highlight.js/styles/github.css?inline'
@@ -140,6 +141,35 @@ export default function App(): React.JSX.Element {
     setContent(next)
     if (markDirty) setDirty(true)
   }, [])
+
+  /*
+   * Formatting applied by selecting in the rendered pane beside the editor.
+   *
+   * The range arrives as character offsets into the source, worked out from
+   * the rendered DOM, so the same edit helpers the editor's own toolbar uses
+   * do the work. Going through applyEdit rather than setting the content
+   * directly matters: applyEdit reduces this to the smallest change, which
+   * keeps undo granular and stops the editor scrolling away from whatever you
+   * were looking at.
+   */
+  const formatFromPreview = useCallback(
+    (action: PreviewFormat, [from, to]: [number, number]) => {
+      const edit =
+        action === 'bold'
+          ? wrapSelection(content, from, to, '**')
+          : action === 'italic'
+            ? wrapSelection(content, from, to, '*')
+            : action === 'code'
+              ? wrapSelection(content, from, to, '`')
+              : action === 'link'
+                ? wrapSelection(content, from, to, '[', '](url)')
+                : prefixLines(content, from, to, '## ')
+
+      editorRef.current?.applyEdit(edit)
+      updateContent(edit.text)
+    },
+    [content, updateContent]
+  )
 
   /**
    * Applies a change that should be undoable at document level. Typing in the
@@ -890,14 +920,13 @@ export default function App(): React.JSX.Element {
                 onFormat={(action) => void actionRef.current(action)}
                 blockTintKinds={blockTints}
               />
-              <div className="live-preview" ref={livePreviewRef}>
-                <article
-                  ref={livePreviewBodyRef}
-                  className="markdown-body"
-                  style={{ fontSize: `${zoom * 15}px` }}
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(content, { sourceLines: true }) }}
-                />
-              </div>
+              <LivePreview
+                source={content}
+                zoom={zoom}
+                onFormat={formatFromPreview}
+                scrollerRef={livePreviewRef}
+                bodyRef={livePreviewBodyRef}
+              />
             </div>
           )}
         </section>
