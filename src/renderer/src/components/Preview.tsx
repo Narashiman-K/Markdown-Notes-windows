@@ -21,6 +21,12 @@ interface Props {
   onComment: () => void
   onRemoveAnnotation: (id: string) => void
   onSelectAnnotation: (id: string | null) => void
+  /**
+   * While reading, the size comes from the reading settings instead of the
+   * zoom. An inline style beats every stylesheet rule, so leaving it on made
+   * the reader's own text-size control do nothing at all.
+   */
+  readerMode?: boolean
   onEditAnnotationNote: (id: string) => void
   onScrollRatio?: (ratio: number) => void
 }
@@ -209,7 +215,7 @@ const Preview = forwardRef<PreviewHandle, Props>(function Preview(props, ref) {
         <article
           ref={hostRef}
           className="markdown-body"
-          style={{ fontSize: `${zoom * 16}px` }}
+          style={props.readerMode ? undefined : { fontSize: `${zoom * 16}px` }}
           dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>

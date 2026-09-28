@@ -1,9 +1,14 @@
 /**
- * The floating control bar shown while reading.
+ * The reading controls: a vertical panel pinned to the left edge.
  *
- * Deliberately faint until pointed at. These are occasional adjustments, and
- * a solid bar hovering over the text would be exactly the chrome that reader
- * mode exists to remove.
+ * It began as a horizontal bar along the bottom, which was wrong twice over.
+ * It sat across the text on a short document, and the way out was a button
+ * labelled "Done" that gave no clue whether it applied to the settings or to
+ * reading itself. Down the left there is empty margin beside a centred column
+ * of text, so the controls occupy space the page was not using.
+ *
+ * Leaving is the first thing in the panel and says what it does, because the
+ * commonest question about any mode is how to get out of it.
  *
  * Kept identical to the copy in the Windows app. Change one, copy it across.
  */
@@ -30,42 +35,54 @@ export default function ReaderControls({ settings, onChange, onExit }: Props): R
     const atMin = step(settings, key, -1)[key] === settings[key]
     const atMax = step(settings, key, 1)[key] === settings[key]
     return (
-      <div className="group" title={title}>
-        <button onClick={() => onChange(step(settings, key, -1))} disabled={atMin} aria-label={`${title}: less`}>
-          {less}
-        </button>
-        <span className="label">{settings[key]}</span>
-        <button onClick={() => onChange(step(settings, key, 1))} disabled={atMax} aria-label={`${title}: more`}>
-          {more}
-        </button>
+      <div className="reader-row">
+        <span className="reader-caption">{title}</span>
+        <div className="reader-step">
+          <button
+            onClick={() => onChange(step(settings, key, -1))}
+            disabled={atMin}
+            aria-label={`${title}: less`}
+          >
+            {less}
+          </button>
+          <span className="reader-value">{settings[key]}</span>
+          <button
+            onClick={() => onChange(step(settings, key, 1))}
+            disabled={atMax}
+            aria-label={`${title}: more`}
+          >
+            {more}
+          </button>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="reader-bar" data-mn-ignore role="toolbar" aria-label="Reading controls">
-      {stepper('size', 'Text size', 'A−', 'A+')}
-      <span className="sep" />
-      {stepper('width', 'Line width', '→←', '←→')}
-      <span className="sep" />
-      {stepper('spacing', 'Line spacing', '≡', '☰')}
-      <span className="sep" />
+    <aside className="reader-panel" data-mn-ignore aria-label="Reading settings">
+      <button className="reader-exit" onClick={onExit} title="Leave reader mode (F9 or Esc)">
+        ← Exit reader
+      </button>
 
+      <div className="reader-divider" />
+
+      {stepper('size', 'Text size', 'A−', 'A+')}
+      {stepper('width', 'Line width', '→←', '←→')}
+      {stepper('spacing', 'Spacing', '≡', '☰')}
+
+      <div className="reader-divider" />
+
+      <span className="reader-caption">Page</span>
       {PALETTE_LABELS.map((p) => (
         <button
           key={p.value}
-          className={settings.palette === p.value ? 'on' : ''}
-          title={`${p.label} — ${p.hint}`}
+          className={`reader-palette${settings.palette === p.value ? ' on' : ''}`}
+          title={p.hint}
           onClick={() => onChange({ ...settings, palette: p.value as ReaderPalette })}
         >
           {p.label}
         </button>
       ))}
-
-      <span className="sep" />
-      <button onClick={onExit} title="Leave reader mode (Esc)">
-        Done
-      </button>
-    </div>
+    </aside>
   )
 }

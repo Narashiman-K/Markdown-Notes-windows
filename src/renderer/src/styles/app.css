@@ -1037,59 +1037,113 @@ html[data-reader] .markdown-body img { max-width: 100%; }
 
 /* --------------------------------------------------------- reader controls */
 
-.reader-bar {
+/*
+ * A vertical panel down the left, not a bar across the bottom.
+ *
+ * A centred column of text leaves wide empty margins, so the controls sit in
+ * space the page was not using rather than over the words. The bottom bar
+ * crossed the text on any document short enough not to fill the screen.
+ */
+.reader-panel {
   position: fixed;
   z-index: 60;
-  left: 50%;
-  bottom: 26px;
-  transform: translateX(-50%);
+  left: 18px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
-  padding: 7px 9px;
-  border-radius: 12px;
+  width: 168px;
+  padding: 12px 12px 14px;
+  border-radius: 14px;
   background: var(--reader-raised);
   border: 1px solid var(--reader-rule);
   color: var(--reader-fg);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
-  /*
-   * Out of the way until wanted. The controls are for occasional adjustment,
-   * and a permanently solid bar floating over the text is exactly the kind of
-   * chrome this mode exists to remove.
-   */
-  opacity: 0.35;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  /* Quiet until wanted, but never so faint that leaving is hard to find. */
+  opacity: 0.55;
   transition: opacity 120ms ease;
 }
-.reader-bar:hover,
-.reader-bar:focus-within { opacity: 1; }
+.reader-panel:hover,
+.reader-panel:focus-within { opacity: 1; }
 
-.reader-bar button {
+.reader-panel button {
   border: 1px solid transparent;
   background: transparent;
   color: var(--reader-fg);
   font: inherit;
-  font-size: 13px;
-  padding: 6px 10px;
+  font-size: 14px;
+  padding: 7px 10px;
   border-radius: 8px;
   cursor: pointer;
+  text-align: left;
   white-space: nowrap;
 }
-.reader-bar button:hover:not(:disabled) { background: rgba(127, 127, 127, 0.18); }
-.reader-bar button:disabled { opacity: 0.35; cursor: default; }
-.reader-bar button.on { background: var(--accent); color: #fff; }
-.reader-bar .sep { width: 1px; height: 22px; background: var(--reader-rule); margin: 0 3px; }
-.reader-bar .group { display: flex; align-items: center; gap: 2px; }
-.reader-bar .label {
+.reader-panel button:hover:not(:disabled) { background: rgba(127, 127, 127, 0.18); }
+.reader-panel button:disabled { opacity: 0.3; cursor: default; }
+
+/* Leaving is the first thing, and it says so. "Done" told nobody whether it
+   applied to the settings or to reading. */
+.reader-exit {
+  font-weight: 600;
+  border-color: var(--reader-rule) !important;
+}
+
+.reader-divider {
+  height: 1px;
+  background: var(--reader-rule);
+  margin: 4px 0;
+}
+
+.reader-caption {
   font-size: 11px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
   color: var(--reader-muted);
-  padding: 0 4px;
-  min-width: 52px;
+  padding: 2px 4px 0;
+}
+
+.reader-row { display: flex; flex-direction: column; gap: 3px; }
+
+.reader-step {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 2px;
+}
+.reader-step button { text-align: center; padding: 6px 8px; }
+
+.reader-value {
+  font-size: 12px;
+  color: var(--reader-muted);
   text-align: center;
   text-transform: capitalize;
 }
 
-@media (max-width: 720px) {
-  .reader-bar { left: 12px; right: 12px; transform: none; justify-content: space-between; }
-  .reader-bar .label { display: none; }
+.reader-palette.on {
+  background: var(--accent);
+  color: #fff;
+}
+
+/*
+ * On a narrow screen there is no margin to sit in, so it returns to a bar
+ * across the bottom rather than covering the text it is meant to serve.
+ */
+@media (max-width: 900px) {
+  .reader-panel {
+    left: 10px;
+    right: 10px;
+    top: auto;
+    bottom: 12px;
+    transform: none;
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+  }
+  .reader-panel .reader-divider { display: none; }
+  .reader-panel .reader-caption { display: none; }
+  .reader-row { flex-direction: row; align-items: center; }
   html[data-reader] .markdown-body { padding: 48px 20px 45vh; }
 }
