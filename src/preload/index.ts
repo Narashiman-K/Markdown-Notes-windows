@@ -25,7 +25,17 @@ const api = {
    * Full screen, developer tools and quit: the three menu commands that have
    * no application-level meaning and can only be done by the main process.
    */
-  appCommand: (name: 'fullscreen' | 'devtools' | 'quit') =>
+  appCommand: (
+    name:
+      | 'cut'
+      | 'copy'
+      | 'paste'
+      | 'selectAll'
+      | 'fullscreen'
+      | 'devtools'
+      | 'quit'
+      | 'clearRecent'
+  ) =>
     ipcRenderer.invoke('app:command', name),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('settings:set', patch),

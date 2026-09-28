@@ -572,6 +572,18 @@ export default function App(): React.JSX.Element {
           else editorRef.current?.openSearch()
           return
 
+        case 'file:clearRecent': {
+          /*
+           * Clearing lives in the main process, which owns the settings file
+           * and the hidden native menu that also lists them. The renderer
+           * re-reads afterwards rather than assuming it worked.
+           */
+          await window.api.appCommand('clearRecent')
+          const after = await window.api.getSettings()
+          setRecentFiles(Array.isArray(after?.recentFiles) ? (after.recentFiles as string[]) : [])
+          return
+        }
+
         case 'view:reader':
           /*
            * Reading implies view mode. Entering it from the editor and

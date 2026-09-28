@@ -25,6 +25,10 @@ interface MenuItem {
   href?: string
   /** Rendered with a tick, for the theme choices. */
   checked?: boolean
+  /** A grey, unclickable caption introducing the items beneath it. */
+  heading?: boolean
+  /** Secondary line in grey. Used for the folder a recent file lives in. */
+  hint?: string
 }
 
 interface Menu {
@@ -39,6 +43,11 @@ interface Props {
 }
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() ?? p
+const dirname = (p: string): string => {
+  const parts = p.split(/[\\/]/)
+  parts.pop()
+  return parts.join('\\') || p
+}
 
 function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
   /*
@@ -46,16 +55,21 @@ function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
    * nested them, but one level of nesting for a list this short buys nothing
    * and a submenu is the fiddliest thing to hit with a mouse.
    */
-  const recent: MenuItem[] = recentFiles.length
-    ? [
-        ...recentFiles.slice(0, 8).map((p) => ({
-          label: basename(p),
-          action: `file:openPath:${p}`
-        })),
-        { separator: true, label: '' },
-        { label: 'Clear recent', action: 'file:clearRecent' }
-      ]
-    : [{ label: 'No recent files', action: undefined }]
+  const recent: MenuItem[] = [
+    { label: 'Recent files', heading: true },
+    ...(recentFiles.length
+      ? [
+          ...recentFiles.slice(0, 8).map((p) => ({
+            label: basename(p),
+            // The folder, so two files of the same name are tellable apart.
+            hint: dirname(p),
+            action: `file:openPath:${p}`
+          })),
+          { separator: true, label: '' },
+          { label: 'Clear recent', action: 'file:clearRecent' }
+        ]
+      : [{ label: 'Nothing opened yet', heading: true }])
+  ]
 
   return [
     {
@@ -107,7 +121,7 @@ function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
         { label: 'Reset zoom', action: 'view:zoom:reset', accelerator: 'Ctrl+0' },
         { separator: true, label: '' },
         { label: 'Outline panel', action: 'view:sidebar:outline', accelerator: 'Ctrl+Shift+O' },
-        { label: 'Comments panel', action: 'view:sidebar:comments', accelerator: 'Ctrl+Shift+C' },
+        { label: 'Annotations panel', action: 'view:sidebar:comments', accelerator: 'Ctrl+Shift+C' },
         { separator: true, label: '' },
         { label: 'Light theme', action: 'view:theme:light', checked: theme === 'light' },
         { label: 'Dark theme', action: 'view:theme:dark', checked: theme === 'dark' },
@@ -136,6 +150,7 @@ function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
         { label: 'Link…', action: 'insert:link', accelerator: 'Ctrl+K' },
         { label: 'Image…', action: 'insert:image' },
         { label: 'Table', action: 'insert:table' },
+        { label: 'Code block', action: 'insert:codeblock' },
         { label: 'Horizontal rule', action: 'insert:hr' }
       ]
     },
@@ -153,18 +168,20 @@ function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
         { separator: true, label: '' },
         { label: 'Add comment…', action: 'annot:comment', accelerator: 'Ctrl+Alt+M' },
         { separator: true, label: '' },
-        { label: 'Remove annotation at selection', action: 'annot:remove' },
+        { label: 'Remove selected annotation', action: 'annot:remove' },
         { label: 'Remove all annotations…', action: 'annot:clearAll' }
       ]
     },
     {
       label: 'AI',
       items: [
-        { label: 'Ask your documents', action: 'ai:toggle', accelerator: 'Ctrl+Shift+A' },
-        { separator: true, label: '' },
-        { label: 'Summarise document', action: 'ai:quick:summarise' },
-        { label: 'Key points', action: 'ai:quick:keypoints' },
-        { label: 'Explain selection', action: 'ai:quick:explain' }
+        /*
+         * The quick actions the native menu listed - summarise, explain,
+         * suggest annotations - are not handled anywhere and never were.
+         * A menu item that does nothing is worse than an absent one, so they
+         * are out until the actions behind them exist.
+         */
+        { label: 'Ask your documents', action: 'ai:toggle', accelerator: 'Ctrl+Shift+A' }
       ]
     },
     {
@@ -222,11 +239,12 @@ export default function MenuBar({ onAction, recentFiles, theme }: Props): React.
      */
     if (action.startsWith('os:')) {
       const which = action.slice(3)
-      if (which === 'cut' || which === 'copy' || which === 'paste' || which === 'selectAll') {
-        document.execCommand(which === 'selectAll' ? 'selectAll' : which)
-      } else {
-        void window.api.appCommand(which as 'fullscreen' | 'devtools' | 'quit')
-      }
+      /*
+       * All of these go to the main process, clipboard included. Chromium
+       * refuses document.execCommand('paste'), so the menu item silently did
+       * nothing while the accelerator worked.
+       */
+      void window.api.appCommand(which as Parameters<typeof window.api.appCommand>[0])
       return
     }
 
@@ -265,6 +283,10 @@ export default function MenuBar({ onAction, recentFiles, theme }: Props): React.
               {menu.items.map((item, i) =>
                 item.separator ? (
                   <div key={i} className="menu-sep" />
+                ) : item.heading ? (
+                  <div key={i} className="menu-group-label">
+                    {item.label}
+                  </div>
                 ) : (
                   <button
                     key={i}
@@ -273,9 +295,12 @@ export default function MenuBar({ onAction, recentFiles, theme }: Props): React.
                     disabled={!item.action && !item.href}
                     onClick={() => run(item)}
                   >
-                    <span>
-                      {item.checked ? '✓ ' : ''}
-                      {item.label}
+                    <span className="menu-item-text">
+                      <span>
+                        {item.checked ? '✓ ' : ''}
+                        {item.label}
+                      </span>
+                      {item.hint && <span className="menu-item-hint">{item.hint}</span>}
                     </span>
                     {item.accelerator && <span className="menu-accel">{item.accelerator}</span>}
                   </button>

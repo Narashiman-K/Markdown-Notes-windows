@@ -1029,6 +1029,19 @@ html[data-theme='dark'] .ok-text { color: #6bd396; }
 .menu-dropdown.sheet .menu-item { padding: 12px 10px; font-size: 15px; }
 
 
+/* A recent file shows its folder underneath, so two files with the same
+   name are tellable apart without opening them. */
+.menu-item-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.menu-item-hint {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 340px;
+}
+.menu-item { align-items: flex-start; }
+.menu-item .menu-accel { padding-top: 2px; }
+
 /* ------------------------------------------------------------ reader mode */
 
 /*

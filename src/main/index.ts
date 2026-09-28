@@ -3,7 +3,7 @@ import { join, basename, dirname } from 'node:path'
 import { promises as fsp, watch as fsWatch, existsSync, type FSWatcher } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { buildMenu } from './menu'
-import { getSettings, setSettings, addRecent } from './store'
+import { getSettings, setSettings, addRecent, clearRecent } from './store'
 import * as ai from './ai'
 import * as secrets from './secrets'
 import { transcribe as transcribeAudio } from './transcribe'
@@ -164,9 +164,26 @@ function createWindow(): void {
 
   ipcMain.handle('app:command', (_e, name: string) => {
     if (!mainWindow) return
-    if (name === 'fullscreen') mainWindow.setFullScreen(!mainWindow.isFullScreen())
+
+    /*
+     * Clipboard commands go through webContents, not document.execCommand.
+     * Chromium refuses execCommand('paste') for security, so the menu item
+     * did nothing while Ctrl+V worked - the accelerator was reaching the
+     * native handler that the menu item was not. These are the same
+     * operations the native menu roles performed.
+     */
+    if (name === 'cut') mainWindow.webContents.cut()
+    else if (name === 'copy') mainWindow.webContents.copy()
+    else if (name === 'paste') mainWindow.webContents.paste()
+    else if (name === 'selectAll') mainWindow.webContents.selectAll()
+    else if (name === 'fullscreen') mainWindow.setFullScreen(!mainWindow.isFullScreen())
     else if (name === 'devtools') mainWindow.webContents.toggleDevTools()
     else if (name === 'quit') mainWindow.close()
+    else if (name === 'clearRecent') {
+      // The hidden native menu still lists them, so it is rebuilt too.
+      clearRecent()
+      buildMenu(mainWindow, (a, p2) => mainWindow?.webContents.send('menu:action', { action: a, payload: p2 }))
+    }
   })
 }
 
