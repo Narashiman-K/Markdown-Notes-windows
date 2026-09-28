@@ -1,0 +1,290 @@
+import { useEffect, useRef, useState } from 'react'
+import { REPO_URL, STORE_URL, featureRequestUrl } from '../../../shared/brand'
+
+/**
+ * In-app menu bar for the desktop build.
+ *
+ * The native Windows menu is still registered, but its bar is hidden. That is
+ * deliberate: every accelerator and every operating-system role — cut, paste,
+ * full screen, developer tools, quit — stays bound exactly as before, so no
+ * shortcut was lost in moving the menu into the window. What changed is only
+ * what is drawn, which is the part that could not be styled and was too small
+ * to read comfortably.
+ *
+ * Items that are pure application commands go through `onAction`, the same
+ * channel the native menu used. The few that are operating-system operations
+ * are handled here, because there is nothing for the application to do with
+ * them.
+ */
+
+interface MenuItem {
+  label: string
+  action?: string
+  accelerator?: string
+  separator?: boolean
+  href?: string
+  /** Rendered with a tick, for the theme choices. */
+  checked?: boolean
+}
+
+interface Menu {
+  label: string
+  items: MenuItem[]
+}
+
+interface Props {
+  onAction: (action: string, payload?: unknown) => void
+  recentFiles: string[]
+  theme: 'light' | 'dark' | 'system'
+}
+
+const basename = (p: string): string => p.split(/[\\/]/).pop() ?? p
+
+function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
+  /*
+   * Recent files are listed inline rather than in a submenu. The native menu
+   * nested them, but one level of nesting for a list this short buys nothing
+   * and a submenu is the fiddliest thing to hit with a mouse.
+   */
+  const recent: MenuItem[] = recentFiles.length
+    ? [
+        ...recentFiles.slice(0, 8).map((p) => ({
+          label: basename(p),
+          action: `file:openPath:${p}`
+        })),
+        { separator: true, label: '' },
+        { label: 'Clear recent', action: 'file:clearRecent' }
+      ]
+    : [{ label: 'No recent files', action: undefined }]
+
+  return [
+    {
+      label: 'File',
+      items: [
+        { label: 'New', action: 'file:new', accelerator: 'Ctrl+N' },
+        { label: 'Open…', action: 'file:open', accelerator: 'Ctrl+O' },
+        { separator: true, label: '' },
+        ...recent,
+        { separator: true, label: '' },
+        { label: 'Save', action: 'file:save', accelerator: 'Ctrl+S' },
+        { label: 'Save as…', action: 'file:saveAs', accelerator: 'Ctrl+Shift+S' },
+        { separator: true, label: '' },
+        { label: 'Export as HTML…', action: 'file:export:html' },
+        { label: 'Export as PDF…', action: 'file:export:pdf' },
+        { label: 'Export without annotations…', action: 'file:export:clean' },
+        { separator: true, label: '' },
+        { label: 'Convert to Markdown…', action: 'convert:open', accelerator: 'Ctrl+Shift+M' },
+        { label: 'Converter settings…', action: 'convert:settings' },
+        { separator: true, label: '' },
+        { label: 'Print…', action: 'file:print', accelerator: 'Ctrl+P' },
+        { separator: true, label: '' },
+        { label: 'Exit', action: 'os:quit', accelerator: 'Alt+F4' }
+      ]
+    },
+    {
+      label: 'Edit',
+      items: [
+        { label: 'Undo', action: 'edit:undo', accelerator: 'Ctrl+Z' },
+        { label: 'Redo', action: 'edit:redo', accelerator: 'Ctrl+Y' },
+        { separator: true, label: '' },
+        { label: 'Cut', action: 'os:cut', accelerator: 'Ctrl+X' },
+        { label: 'Copy', action: 'os:copy', accelerator: 'Ctrl+C' },
+        { label: 'Paste', action: 'os:paste', accelerator: 'Ctrl+V' },
+        { label: 'Select all', action: 'os:selectAll', accelerator: 'Ctrl+A' },
+        { separator: true, label: '' },
+        { label: 'Find…', action: 'edit:find', accelerator: 'Ctrl+F' }
+      ]
+    },
+    {
+      label: 'View',
+      items: [
+        { label: 'View mode', action: 'view:mode:view', accelerator: 'Ctrl+Shift+V' },
+        { label: 'Edit mode', action: 'view:mode:edit', accelerator: 'Ctrl+E' },
+        { label: 'Reader mode', action: 'view:reader', accelerator: 'F9' },
+        { separator: true, label: '' },
+        { label: 'Zoom in', action: 'view:zoom:in', accelerator: 'Ctrl++' },
+        { label: 'Zoom out', action: 'view:zoom:out', accelerator: 'Ctrl+-' },
+        { label: 'Reset zoom', action: 'view:zoom:reset', accelerator: 'Ctrl+0' },
+        { separator: true, label: '' },
+        { label: 'Outline panel', action: 'view:sidebar:outline', accelerator: 'Ctrl+Shift+O' },
+        { label: 'Comments panel', action: 'view:sidebar:comments', accelerator: 'Ctrl+Shift+C' },
+        { separator: true, label: '' },
+        { label: 'Light theme', action: 'view:theme:light', checked: theme === 'light' },
+        { label: 'Dark theme', action: 'view:theme:dark', checked: theme === 'dark' },
+        { label: 'Follow system', action: 'view:theme:system', checked: theme === 'system' },
+        { separator: true, label: '' },
+        { label: 'Full screen', action: 'os:fullscreen', accelerator: 'F11' },
+        { label: 'Developer tools', action: 'os:devtools', accelerator: 'Ctrl+Shift+I' }
+      ]
+    },
+    {
+      label: 'Insert',
+      items: [
+        { label: 'Bold', action: 'insert:bold', accelerator: 'Ctrl+B' },
+        { label: 'Italic', action: 'insert:italic', accelerator: 'Ctrl+I' },
+        { label: 'Inline code', action: 'insert:code', accelerator: 'Ctrl+`' },
+        { separator: true, label: '' },
+        { label: 'Heading 1', action: 'insert:h1', accelerator: 'Ctrl+1' },
+        { label: 'Heading 2', action: 'insert:h2', accelerator: 'Ctrl+2' },
+        { label: 'Heading 3', action: 'insert:h3', accelerator: 'Ctrl+3' },
+        { separator: true, label: '' },
+        { label: 'Bullet list', action: 'insert:ul' },
+        { label: 'Numbered list', action: 'insert:ol' },
+        { label: 'Task list item', action: 'insert:task' },
+        { label: 'Block quote', action: 'insert:quote' },
+        { separator: true, label: '' },
+        { label: 'Link…', action: 'insert:link', accelerator: 'Ctrl+K' },
+        { label: 'Image…', action: 'insert:image' },
+        { label: 'Table', action: 'insert:table' },
+        { label: 'Horizontal rule', action: 'insert:hr' }
+      ]
+    },
+    {
+      label: 'Annotate',
+      items: [
+        { label: 'Highlight yellow', action: 'annot:highlight:yellow', accelerator: 'Ctrl+Alt+1' },
+        { label: 'Highlight green', action: 'annot:highlight:green', accelerator: 'Ctrl+Alt+2' },
+        { label: 'Highlight blue', action: 'annot:highlight:blue', accelerator: 'Ctrl+Alt+3' },
+        { label: 'Highlight pink', action: 'annot:highlight:pink', accelerator: 'Ctrl+Alt+4' },
+        { separator: true, label: '' },
+        { label: 'Underline', action: 'annot:underline', accelerator: 'Ctrl+U' },
+        { label: 'Strikethrough', action: 'annot:strike', accelerator: 'Ctrl+Shift+X' },
+        { label: 'Bold emphasis', action: 'annot:bold', accelerator: 'Ctrl+Alt+B' },
+        { separator: true, label: '' },
+        { label: 'Add comment…', action: 'annot:comment', accelerator: 'Ctrl+Alt+M' },
+        { separator: true, label: '' },
+        { label: 'Remove annotation at selection', action: 'annot:remove' },
+        { label: 'Remove all annotations…', action: 'annot:clearAll' }
+      ]
+    },
+    {
+      label: 'AI',
+      items: [
+        { label: 'Ask your documents', action: 'ai:toggle', accelerator: 'Ctrl+Shift+A' },
+        { separator: true, label: '' },
+        { label: 'Summarise document', action: 'ai:quick:summarise' },
+        { label: 'Key points', action: 'ai:quick:keypoints' },
+        { label: 'Explain selection', action: 'ai:quick:explain' }
+      ]
+    },
+    {
+      label: 'Help',
+      items: [
+        { label: 'Keyboard shortcuts', action: 'help:shortcuts', accelerator: 'F1' },
+        { separator: true, label: '' },
+        { label: 'Request a feature', action: 'help:featureVote' },
+        { label: 'Source on GitHub', href: REPO_URL },
+        { label: 'Privacy policy', href: `${REPO_URL}/blob/main/docs/privacy.md` },
+        { label: 'Rate it in the Store', href: STORE_URL },
+        { separator: true, label: '' },
+        { label: 'About', action: 'help:about' }
+      ]
+    }
+  ]
+}
+
+export default function MenuBar({ onAction, recentFiles, theme }: Props): React.JSX.Element {
+  const [open, setOpen] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent): void => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(null)
+    }
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(null)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', esc)
+    }
+  }, [open])
+
+  const run = (item: MenuItem): void => {
+    setOpen(null)
+    if (!item.action && !item.href) return
+
+    if (item.href) {
+      // Main intercepts window-open and hands it to the system browser.
+      window.open(item.href, '_blank')
+      return
+    }
+
+    const action = item.action as string
+
+    /*
+     * Operating-system operations are done here. There is nothing for the
+     * application layer to do with a clipboard command, and routing them
+     * through it would mean inventing handlers that only forward.
+     */
+    if (action.startsWith('os:')) {
+      const which = action.slice(3)
+      if (which === 'cut' || which === 'copy' || which === 'paste' || which === 'selectAll') {
+        document.execCommand(which === 'selectAll' ? 'selectAll' : which)
+      } else {
+        void window.api.appCommand(which as 'fullscreen' | 'devtools' | 'quit')
+      }
+      return
+    }
+
+    // Opening a recent file carries the path in the action itself.
+    if (action.startsWith('file:openPath:')) {
+      onAction('file:openPath', action.slice('file:openPath:'.length))
+      return
+    }
+
+    if (action === 'help:featureVote') {
+      window.open(featureRequestUrl(), '_blank')
+      return
+    }
+
+    onAction(action)
+  }
+
+  const all = menus(recentFiles, theme)
+
+  return (
+    <div className="menubar" ref={ref}>
+      {all.map((menu) => (
+        <div className="menu-root" key={menu.label}>
+          <button
+            className={`menu-title${open === menu.label ? ' on' : ''}`}
+            onClick={() => setOpen(open === menu.label ? null : menu.label)}
+            // Sliding along an open menu bar should open each menu in turn,
+            // which is what every native menu does.
+            onMouseEnter={() => open && setOpen(menu.label)}
+          >
+            {menu.label}
+          </button>
+
+          {open === menu.label && (
+            <div className="menu-dropdown" role="menu">
+              {menu.items.map((item, i) =>
+                item.separator ? (
+                  <div key={i} className="menu-sep" />
+                ) : (
+                  <button
+                    key={i}
+                    className="menu-item"
+                    role="menuitem"
+                    disabled={!item.action && !item.href}
+                    onClick={() => run(item)}
+                  >
+                    <span>
+                      {item.checked ? '✓ ' : ''}
+                      {item.label}
+                    </span>
+                    {item.accelerator && <span className="menu-accel">{item.accelerator}</span>}
+                  </button>
+                )
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}

@@ -53,7 +53,7 @@ function createWindow(): void {
     minWidth: 640,
     minHeight: 480,
     show: false,
-    autoHideMenuBar: false,
+    autoHideMenuBar: true,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1f1f1f' : '#ffffff',
     title: APP_DISPLAY_NAME,
     // Without this the window and taskbar show Electron's default icon during
@@ -150,6 +150,24 @@ function createWindow(): void {
   }
 
   buildMenu(mainWindow, (action, payload) => mainWindow?.webContents.send('menu:action', { action, payload }))
+
+  /*
+   * The native menu stays registered but its bar is hidden.
+   *
+   * Registering it is what binds the accelerators and the operating-system
+   * roles - cut, paste, full screen, developer tools, quit. Removing the menu
+   * to draw our own would have silently unbound roughly thirty shortcuts. The
+   * window draws its own menu instead, which is the part that could not be
+   * styled and was too small to read.
+   */
+  mainWindow.setMenuBarVisibility(false)
+
+  ipcMain.handle('app:command', (_e, name: string) => {
+    if (!mainWindow) return
+    if (name === 'fullscreen') mainWindow.setFullScreen(!mainWindow.isFullScreen())
+    else if (name === 'devtools') mainWindow.webContents.toggleDevTools()
+    else if (name === 'quit') mainWindow.close()
+  })
 }
 
 function send(channel: string, payload?: unknown): void {

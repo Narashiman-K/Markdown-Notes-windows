@@ -21,6 +21,12 @@ const api = {
   findStart: (args: { text: string; forward?: boolean; findNext?: boolean }) => ipcRenderer.invoke('find:start', args),
   findStop: () => ipcRenderer.invoke('find:stop'),
 
+  /**
+   * Full screen, developer tools and quit: the three menu commands that have
+   * no application-level meaning and can only be done by the main process.
+   */
+  appCommand: (name: 'fullscreen' | 'devtools' | 'quit') =>
+    ipcRenderer.invoke('app:command', name),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('settings:set', patch),
 

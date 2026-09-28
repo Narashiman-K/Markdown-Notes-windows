@@ -931,6 +931,104 @@ html[data-theme='dark'] .ok-text { color: #6bd396; }
 /* Nothing in the panel may push it horizontally. */
 .ai-panel, .ai-panel .ai-scroll { max-width: 100%; overflow-x: hidden; }
 
+/* ------------------------------------------------------------- menu bar */
+
+.menubar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--chrome-border);
+  padding: 0 4px;
+  flex: 0 0 auto;
+  user-select: none;
+  position: relative;
+  z-index: 60;
+}
+
+.menu-root { position: relative; display: flex; }
+
+.menu-title {
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  /* Raised from 13px. The bar was hard to read and a small target to hit,
+     and it is the one piece of chrome that is always on screen. */
+  font-size: 17px;
+  padding: 9px 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.menu-title:hover { background: var(--hover); }
+.menu-title.on { background: var(--accent); color: #fff; }
+
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 250px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--chrome);
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 5px;
+  z-index: 70;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px;
+  text-align: left;
+  padding: 9px 13px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.menu-item:hover { background: var(--accent); color: #fff; }
+.menu-item:hover .menu-accel { color: rgba(255, 255, 255, 0.75); }
+
+.menu-accel { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+
+.menu-sep { height: 1px; background: var(--chrome-border); margin: 6px 8px; }
+
+.menu-group-label {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  padding: 10px 10px 4px;
+}
+
+/* Phone: one button, and the panel becomes a full-height sheet. */
+.menubar.compact { padding: 2px 4px; }
+.menubar.compact .menu-title { font-size: 18px; padding: 6px 12px; }
+.menu-dropdown.sheet {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  max-height: 100vh;
+  border-radius: 0;
+  padding: 12px;
+  overscroll-behavior: contain;
+}
+.menu-dropdown.sheet .menu-item { padding: 12px 10px; font-size: 15px; }
+
+
 /* ------------------------------------------------------------ reader mode */
 
 /*

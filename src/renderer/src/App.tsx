@@ -35,6 +35,7 @@ import { DEFAULT_BLOCK_TINTS, type BlockKind } from './lib/blockTints'
 import { linkScrollers, previewScrollTarget, type ScrollSyncTarget } from './lib/syncScroll'
 import LivePreview, { type PreviewFormat } from './components/LivePreview'
 import ReaderControls from './components/ReaderControls'
+import MenuBar from './components/MenuBar'
 import {
   applyReaderVariables,
   DEFAULT_READER,
@@ -94,6 +95,7 @@ export default function App(): React.JSX.Element {
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY)
   const [reviewChanges, setReviewChanges] = useState(true)
   const [blockTints, setBlockTints] = useState<BlockKind[]>(() => [...DEFAULT_BLOCK_TINTS])
+  const [recentFiles, setRecentFiles] = useState<string[]>([])
   const [readerOn, setReaderOn] = useState(false)
   const [reader, setReader] = useState<ReaderSettings>(DEFAULT_READER)
   /*
@@ -810,6 +812,7 @@ export default function App(): React.JSX.Element {
       if (typeof s?.aiReviewChanges === 'boolean') setReviewChanges(s.aiReviewChanges)
       // Absent means the setting predates this feature, which is not the same
       // as an empty array — that is a deliberate "tint nothing".
+      if (Array.isArray(s?.recentFiles)) setRecentFiles(s.recentFiles as string[])
       if (Array.isArray(s?.blockTints)) setBlockTints(s.blockTints as BlockKind[])
       if (s?.reader) setReader({ ...DEFAULT_READER, ...(s.reader as Partial<ReaderSettings>) })
     })
@@ -929,6 +932,11 @@ export default function App(): React.JSX.Element {
           onExit={() => setReaderOn(false)}
         />
       )}
+      <MenuBar
+        onAction={(a, payload) => void actionRef.current(a, payload)}
+        recentFiles={recentFiles}
+        theme={theme}
+      />
       <Toolbar
         mode={mode}
         readerOn={readerOn}
