@@ -943,6 +943,31 @@ html[data-theme='dark'] .ok-text { color: #6bd396; }
  * Everything is scoped to html[data-reader] so leaving reader mode restores
  * the ordinary interface with no cleanup beyond removing the attribute.
  */
+/*
+ * The reading palette replaces the application's own colour variables.
+ *
+ * Overriding only the obvious things was not enough: every existing rule that
+ * reaches for --zebra, --code-bg or --th-bg kept painting with the interface
+ * theme, so a dark theme left black stripes across a sepia page with
+ * unreadable text in them. Redefining the variables at the root of reader
+ * mode means every rule in the stylesheet adapts without knowing reader mode
+ * exists, which is the only version of this that stays correct as the
+ * stylesheet grows.
+ */
+html[data-reader] {
+  --fg: var(--reader-fg);
+  --bg: var(--reader-bg);
+  --muted: var(--reader-muted);
+  --rule: var(--reader-rule);
+  --link: var(--reader-link);
+  --code-bg: var(--reader-raised);
+  --th-bg: var(--reader-raised);
+  --zebra: var(--reader-raised);
+  --quote-bar: var(--reader-rule);
+  --chrome: var(--reader-raised);
+  --chrome-border: var(--reader-rule);
+}
+
 html[data-reader] body {
   background: var(--reader-bg);
 }
@@ -1023,9 +1048,10 @@ html[data-reader] .markdown-body img { max-width: 100%; }
   gap: 6px;
   padding: 7px 9px;
   border-radius: 12px;
-  background: var(--chrome);
-  border: 1px solid var(--chrome-border);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  background: var(--reader-raised);
+  border: 1px solid var(--reader-rule);
+  color: var(--reader-fg);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
   /*
    * Out of the way until wanted. The controls are for occasional adjustment,
    * and a permanently solid bar floating over the text is exactly the kind of
@@ -1040,7 +1066,7 @@ html[data-reader] .markdown-body img { max-width: 100%; }
 .reader-bar button {
   border: 1px solid transparent;
   background: transparent;
-  color: var(--fg);
+  color: var(--reader-fg);
   font: inherit;
   font-size: 13px;
   padding: 6px 10px;
@@ -1048,14 +1074,14 @@ html[data-reader] .markdown-body img { max-width: 100%; }
   cursor: pointer;
   white-space: nowrap;
 }
-.reader-bar button:hover:not(:disabled) { background: var(--hover); }
+.reader-bar button:hover:not(:disabled) { background: rgba(127, 127, 127, 0.18); }
 .reader-bar button:disabled { opacity: 0.35; cursor: default; }
 .reader-bar button.on { background: var(--accent); color: #fff; }
-.reader-bar .sep { width: 1px; height: 22px; background: var(--chrome-border); margin: 0 3px; }
+.reader-bar .sep { width: 1px; height: 22px; background: var(--reader-rule); margin: 0 3px; }
 .reader-bar .group { display: flex; align-items: center; gap: 2px; }
 .reader-bar .label {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--reader-muted);
   padding: 0 4px;
   min-width: 52px;
   text-align: center;

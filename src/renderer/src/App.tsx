@@ -580,10 +580,19 @@ export default function App(): React.JSX.Element {
           setReaderOn((on) => !on)
           return
 
+        /*
+         * Choosing a mode explicitly leaves reader mode.
+         *
+         * Without this, picking View while already reading did nothing
+         * visible - it was already in view mode - so the only way out was the
+         * reader toggle itself, which is not where anyone looks.
+         */
         case 'view:mode:view':
+          setReaderOn(false)
           setMode('view')
           return
         case 'view:mode:edit':
+          setReaderOn(false)
           setMode('edit')
           return
         case 'view:zoom:in':

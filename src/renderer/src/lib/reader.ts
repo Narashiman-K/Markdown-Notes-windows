@@ -185,10 +185,18 @@ export function step<K extends keyof typeof ORDER>(
   return { ...settings, [key]: next }
 }
 
+/*
+ * Only three are offered.
+ *
+ * Paper and night still exist, because auto resolves to them, but they were
+ * confusing as separate buttons: the application already has a light and dark
+ * theme, so offering "Paper" and "Night" alongside it gave two controls for
+ * one decision and left people wondering why changing the theme appeared to
+ * do nothing. Auto follows the theme; the other two are deliberate overrides
+ * that ignore it, which is a distinction worth keeping small.
+ */
 export const PALETTE_LABELS: Array<{ value: ReaderPalette; label: string; hint: string }> = [
-  { value: 'auto', label: 'Auto', hint: 'Follows your device' },
-  { value: 'paper', label: 'Paper', hint: 'Warm white' },
-  { value: 'sepia', label: 'Sepia', hint: 'Easier on the eyes' },
-  { value: 'night', label: 'Night', hint: 'Dark page' },
+  { value: 'auto', label: 'Auto', hint: 'Follows your light or dark theme' },
+  { value: 'sepia', label: 'Sepia', hint: 'Warm page, easier on the eyes' },
   { value: 'contrast', label: 'High contrast', hint: 'Maximum legibility' }
 ]
