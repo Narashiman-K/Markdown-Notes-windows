@@ -104,7 +104,13 @@ function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
         { label: 'Cut', action: 'os:cut', accelerator: 'Ctrl+X' },
         { label: 'Copy', action: 'os:copy', accelerator: 'Ctrl+C' },
         { label: 'Paste', action: 'os:paste', accelerator: 'Ctrl+V' },
-        { label: 'Select all', action: 'os:selectAll', accelerator: 'Ctrl+A' },
+        /*
+         * Select all goes through the application, not webContents. The
+         * webContents command selects whatever is focused at the document
+         * level, which is the reading pane even when the editor is the thing
+         * being worked in.
+         */
+        { label: 'Select all', action: 'edit:selectAll', accelerator: 'Ctrl+A' },
         { separator: true, label: '' },
         { label: 'Find…', action: 'edit:find', accelerator: 'Ctrl+F' }
       ]
@@ -270,6 +276,16 @@ export default function MenuBar({ onAction, recentFiles, theme }: Props): React.
         <div className="menu-root" key={menu.label}>
           <button
             className={`menu-title${open === menu.label ? ' on' : ''}`}
+            /*
+             * Never take focus.
+             *
+             * Cut, paste and select all act on whatever is focused. Clicking a
+             * menu button moves focus to the button, so by the time the
+             * handler ran the editor had lost it: paste went nowhere and
+             * select all fell back to the document body, which is the reading
+             * pane. Refusing focus leaves the caret where the user left it.
+             */
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => setOpen(open === menu.label ? null : menu.label)}
             // Sliding along an open menu bar should open each menu in turn,
             // which is what every native menu does.
@@ -293,6 +309,7 @@ export default function MenuBar({ onAction, recentFiles, theme }: Props): React.
                     className="menu-item"
                     role="menuitem"
                     disabled={!item.action && !item.href}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => run(item)}
                   >
                     <span className="menu-item-text">

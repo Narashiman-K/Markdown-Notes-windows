@@ -36,6 +36,10 @@ export interface EditorHandle {
   scrollTarget: () => ScrollSyncTarget | null
   /** Opens CodeMirror's find-and-replace panel. */
   openSearch: () => void
+  /** Selects the whole document. */
+  selectAll: () => void
+  /** Replaces the selection with `text`, as a paste would. */
+  insertText: (text: string) => void
 }
 
 interface Props {
@@ -364,6 +368,31 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
      * the editor. The Edit menu had no way to reach it and merely focused the
      * editor, so the menu item looked broken while the shortcut worked.
      */
+    selectAll: () => {
+      const view = viewRef.current
+      if (!view) return
+      view.focus()
+      view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } })
+    },
+
+    /*
+     * Used by the menu's Paste, which cannot rely on the browser's own paste.
+     * Chromium refuses document.execCommand('paste'), so the clipboard is
+     * read through the async API and the text inserted here instead.
+     */
+    insertText: (text: string) => {
+      const view = viewRef.current
+      if (!view) return
+      const range = view.state.selection.main
+      view.dispatch({
+        changes: { from: range.from, to: range.to, insert: text },
+        selection: { anchor: range.from + text.length },
+        scrollIntoView: true,
+        userEvent: 'input.paste'
+      })
+      view.focus()
+    },
+
     openSearch: () => {
       const view = viewRef.current
       if (!view) return

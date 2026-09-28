@@ -572,6 +572,13 @@ export default function App(): React.JSX.Element {
           else editorRef.current?.openSearch()
           return
 
+        case 'edit:selectAll':
+          // The editor pane when editing, the document otherwise. A
+          // document-level select-all would take the reading pane instead.
+          if (mode === 'edit') editorRef.current?.selectAll()
+          else document.execCommand('selectAll')
+          return
+
         case 'file:clearRecent': {
           /*
            * Clearing lives in the main process, which owns the settings file
