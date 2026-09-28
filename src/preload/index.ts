@@ -16,7 +16,7 @@ const api = {
   exportHtml: (args: { html: string; suggestedName: string }) => ipcRenderer.invoke('file:exportHtml', args),
   exportPdf: (args: { html: string; suggestedName: string }) => ipcRenderer.invoke('file:exportPdf', args),
   exportMarkdown: (args: { text: string; suggestedName: string }) => ipcRenderer.invoke('file:exportMarkdown', args),
-  print: (args: { html: string }) => ipcRenderer.invoke('file:print', args),
+  print: (args: { html: string; title?: string }) => ipcRenderer.invoke('file:print', args),
 
   findStart: (args: { text: string; forward?: boolean; findNext?: boolean }) => ipcRenderer.invoke('find:start', args),
   findStop: () => ipcRenderer.invoke('find:stop'),

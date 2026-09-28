@@ -10,7 +10,7 @@ import ConvertDialog from './components/ConvertDialog'
 import AiPanel from './components/AiPanel'
 import DiffDialog from './components/DiffDialog'
 import { installSignature, signatureComment } from './lib/signature'
-import { findQuoteRange } from './lib/aiPrompts'
+import { findQuoteRange, type AiMode } from './lib/aiPrompts'
 import { featureRequestUrl } from '../../shared/brand'
 import type { Chunk, SourceDoc } from './lib/retrieval'
 import {
@@ -90,6 +90,9 @@ export default function App(): React.JSX.Element {
   const [convertSeed, setConvertSeed] = useState<string[] | null>(null)
   const [appDragging, setAppDragging] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
+  // A quick action chosen from the AI menu, waiting for the panel to pick it
+  // up. Null whenever there is nothing outstanding.
+  const [pendingQuick, setPendingQuick] = useState<AiMode | null>(null)
   const [extraDocs, setExtraDocs] = useState<SourceDoc[]>([])
   const [selectionText, setSelectionText] = useState('')
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY)
@@ -275,6 +278,22 @@ export default function App(): React.JSX.Element {
     setHistory(EMPTY_HISTORY)
     if (path) window.api.basename(path).then(setFileName)
     else setFileName('Untitled')
+
+    /*
+     * Re-read the recent list from the main process.
+     *
+     * The main process owns it: it appends to the settings file whenever it
+     * hands a path to the renderer. The renderer used to read that list once,
+     * at startup, so the File menu showed whatever was there when the window
+     * opened and never grew — the file you had just opened was missing from it
+     * until the next launch. Every open funnels through here, so this is the
+     * one place that needs to ask again.
+     */
+    if (path) {
+      void window.api.getSettings().then((s) => {
+        if (Array.isArray(s?.recentFiles)) setRecentFiles(s.recentFiles as string[])
+      })
+    }
   }, [])
 
   /* ------------------------------------------------------------ file ops */
@@ -523,6 +542,19 @@ export default function App(): React.JSX.Element {
         case 'ai:toggle':
           setAiOpen((v) => !v)
           return
+        case 'ai:quick:summarise':
+        case 'ai:quick:compare':
+        case 'ai:quick:explain':
+        case 'ai:quick:annotate':
+          /*
+           * Open the panel and hand it the action. Opening is unconditional
+           * rather than a toggle: choosing "Summarise" from a menu is a request
+           * to see the answer, and toggling would close the panel it is about
+           * to write into.
+           */
+          setAiOpen(true)
+          setPendingQuick(action.slice('ai:quick:'.length) as AiMode)
+          return
         case 'edit:undo':
           doUndo()
           return
@@ -558,7 +590,7 @@ export default function App(): React.JSX.Element {
           return
         }
         case 'file:print': {
-          const r = await window.api.print({ html: buildStandalone(true) })
+          const r = await window.api.print({ html: buildStandalone(true), title: fileName })
           if (!r.ok && r.error && !/cancel/i.test(r.error)) flash(`Print failed: ${r.error}`)
           return
         }
@@ -1047,6 +1079,8 @@ export default function App(): React.JSX.Element {
             onApplyRevision={applyAiRevision}
             onApplyAnnotations={applyAiAnnotations}
             onToast={flash}
+            pendingQuick={pendingQuick}
+            onQuickHandled={() => setPendingQuick(null)}
           />
         )}
       </main>

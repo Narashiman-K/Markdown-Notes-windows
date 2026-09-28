@@ -112,10 +112,53 @@ md.core.ruler.push('mn_heading_ids', (state) => {
   return true
 })
 
+/*
+ * `file:` URLs, so that a local image actually appears.
+ *
+ * Insert > Image writes the picture's real path, which on Windows comes out as
+ * `![alt](file:///C:/Users/...)`. That was showing up in the viewer as literal
+ * text, because two independent gates rejected it:
+ *
+ *   1. markdown-it's default `validateLink` blocks `file:` alongside
+ *      `javascript:` and `vbscript:`. A rejected link is not an error — the
+ *      image token is simply never created and the source falls through as
+ *      plain text, which is exactly what was on screen.
+ *   2. DOMPurify's default `ALLOWED_URI_REGEXP` admits only http(s), ftp(s),
+ *      mailto, tel, callto, sms, cid and xmpp, so even once markdown-it
+ *      emitted an `<img>`, the sanitiser stripped its src.
+ *
+ * Both had to open. The scheme list below is DOMPurify's own default with
+ * `file` added and nothing removed, so every other protocol is judged exactly
+ * as before.
+ *
+ * The web build cannot load `file:` at all — a page served over http has no
+ * access to the disk, and the browser blocks it whatever this says — so both
+ * builds keep the identical rule rather than diverging over something with no
+ * effect in one of them.
+ *
+ * Images only. A `file:` *link* is a different proposition: a click would hand
+ * an arbitrary local path to the shell, and a document can come from anywhere.
+ * The hook below drops `href` from anchors pointing at one, which also covers
+ * `file:` anchors written as raw HTML rather than as markdown.
+ */
+const defaultValidateLink = md.validateLink.bind(md)
+md.validateLink = (url: string): boolean =>
+  /^file:\/\//i.test(url.trim()) || defaultValidateLink(url)
+
+const URI_ALLOWED =
+  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|file):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
+
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  const el = node as unknown as Element
+  if (el.tagName !== 'A') return
+  if (/^\s*file:/i.test(el.getAttribute('href') ?? '')) el.removeAttribute('href')
+})
+
 const PURIFY_CONFIG = {
   ADD_TAGS: ['mark', 'ins', 'del', 'kbd', 'abbr', 'sub', 'sup', 'details', 'summary'],
   ADD_ATTR: ['target', 'rel', 'align', 'colspan', 'rowspan', 'id', 'class', 'start', 'checked', 'disabled', 'type'],
-  ALLOW_DATA_ATTR: true
+  ALLOW_DATA_ATTR: true,
+  ALLOWED_URI_REGEXP: URI_ALLOWED
 }
 
 export function renderMarkdown(source: string, options?: { sourceLines?: boolean }): string {

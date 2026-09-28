@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, nativeTheme, type IpcMainInvokeEvent } from 'electron'
 import { join, basename, dirname } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { promises as fsp, watch as fsWatch, existsSync, type FSWatcher } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { buildMenu } from './menu'
@@ -396,21 +397,69 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('file:print', async (_e, args: { html: string }) => {
-    let w: BrowserWindow | null = null
+  /*
+   * Print, via a preview window.
+   *
+   * This used to render the document into a hidden window and call
+   * `webContents.print()`, which opens the operating system's print dialog
+   * directly. On Windows that dialog reports "This app doesn't support print
+   * preview", because the preview pane is a service the host application has to
+   * provide and Electron does not implement it. There is no flag that turns it
+   * on — pressing Print worked, but you could not see what you were about to
+   * get, which is the part people actually use.
+   *
+   * So the preview is produced here instead: lay the document out, run it
+   * through `printToPDF` at the same page size and margins the printer will
+   * use, and show the result in Chromium's own PDF viewer. That viewer
+   * paginates, scrolls, zooms and has its own print button, so what is on
+   * screen is the printed pages rather than an approximation of them — and
+   * printing from it goes through the same dialog as before.
+   *
+   * Resolving as soon as the window is showing, rather than waiting for a
+   * print to happen, keeps the renderer out of it: from here on the user is
+   * dealing with the preview window and may well decide not to print at all.
+   */
+  ipcMain.handle('file:print', async (_e, args: { html: string; title?: string }) => {
+    let layout: BrowserWindow | null = null
+    let pdfPath: string | null = null
     try {
-      w = await renderInHiddenWindow(args.html)
-      const target = w
-      const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-        target.webContents.print({ printBackground: true, silent: false }, (success, reason) =>
-          resolve({ ok: success, error: success ? undefined : reason })
-        )
+      layout = await renderInHiddenWindow(args.html)
+      const data = await layout.webContents.printToPDF({
+        printBackground: true,
+        margins: { marginType: 'default' },
+        pageSize: 'A4'
       })
-      return result
+
+      pdfPath = join(tmpdir(), `marknote-preview-${Date.now()}.pdf`)
+      await fsp.writeFile(pdfPath, data)
+
+      const preview = new BrowserWindow({
+        width: 900,
+        height: 1000,
+        parent: mainWindow ?? undefined,
+        title: `Print preview — ${args.title ?? 'Document'}`,
+        autoHideMenuBar: true,
+        webPreferences: { plugins: true }
+      })
+      preview.setMenuBarVisibility(false)
+
+      // The temporary PDF is the window's to own: delete it once the window
+      // has gone, not when this handler returns, or the viewer loses the file
+      // underneath itself.
+      const scratch = pdfPath
+      preview.on('closed', () => {
+        void fsp.unlink(scratch).catch(() => undefined)
+      })
+      pdfPath = null
+
+      await preview.loadURL(pathToFileURL(scratch).toString())
+      preview.show()
+      return { ok: true }
     } catch (err) {
+      if (pdfPath) await fsp.unlink(pdfPath).catch(() => undefined)
       return { ok: false, error: String((err as Error).message ?? err) }
     } finally {
-      if (w) await disposeHidden(w)
+      if (layout) await disposeHidden(layout)
     }
   })
 

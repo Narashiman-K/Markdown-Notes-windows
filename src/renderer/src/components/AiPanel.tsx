@@ -33,6 +33,17 @@ export interface AiPanelProps {
   onApplyRevision: (nextDocument: string, label: string) => void
   onApplyAnnotations: (items: Array<{ quote: string; type: string; color?: string; note?: string }>) => void
   onToast: (msg: string) => void
+  /**
+   * A quick action requested from the AI menu, or null.
+   *
+   * The panel's own chips call the action directly, but a menu item may be
+   * chosen while the panel is closed, so the request arrives as a value rather
+   * than through an imperative handle — there is nothing to hold a handle to
+   * yet at that moment. The panel clears it through `onQuickHandled` as soon
+   * as it picks it up, so reopening the panel later does not re-run it.
+   */
+  pendingQuick: AiMode | null
+  onQuickHandled: () => void
 }
 
 const PROVIDERS: Array<{ id: ProviderId; label: string; blurb: string }> = [
@@ -216,6 +227,17 @@ export default function AiPanel(props: AiPanelProps): React.JSX.Element {
     }
     await send(action.id, action.prompt)
   }
+
+  const pendingQuick = props.pendingQuick
+  useEffect(() => {
+    if (!pendingQuick) return
+    // Cleared first, so a failing request cannot leave the request latched and
+    // fire again on the next render.
+    props.onQuickHandled()
+    const action = QUICK_ACTIONS.find((a) => a.id === pendingQuick)
+    if (action) void runQuickAction(action)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingQuick])
 
   /* ------------------------------------------- applying results to the doc */
 

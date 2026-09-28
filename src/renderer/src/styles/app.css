@@ -177,12 +177,35 @@ button.tb.accent { color: var(--accent); font-weight: 700; }
 /*
  * Keep the find-and-replace panel underneath any in-page chrome.
  *
- * CodeMirror ships `.cm-panels` at z-index 300, which in the browser build put
- * the search panel above the HTML menubar and covered every menu opened while
- * it was showing. This build has native Electron menus, drawn by the operating
- * system outside the web content, so it never hit that — the rule is here to
- * keep the two stylesheets saying the same thing rather than to fix anything
- * visible today.
+ * CodeMirror ships `.cm-panels` at z-index 300, which puts the search panel
+ * above the menubar and its dropdowns, so an open panel covered every menu
+ * opened while it was showing.
+ *
+ * This comment used to say the desktop build was immune because its menus were
+ * native Electron menus drawn by the operating system, outside the web content.
+ * That stopped being true when the native bar was replaced with the same HTML
+ * menubar the web build uses, and the bug appeared here too.
+ */
+/*
+ * ------------------------------------------------------------ stacking bands
+ *
+ * The find panel kept covering menus that were opened while it was showing,
+ * and each attempt to fix it moved one number against one other number. The
+ * numbers are grouped into bands instead, so anything added later has an
+ * obvious place to sit:
+ *
+ *    0 -  59   document furniture: the find bar, the paste chooser, the
+ *              selection and format toolbars, CodeMirror's own panels
+ *   60 -  99   panes docked beside the document: reader controls, sidebar,
+ *              AI panel
+ *  100 - 199   application chrome: the menubar and its dropdowns, which must
+ *              be able to open over any of the above
+ *  200 +       things that take over the window: modals, the drop target,
+ *              toasts
+ *
+ * The rule that matters is the third band being above the first two. A menu is
+ * the user acting on the app, so nothing inside the document can be in front
+ * of it.
  */
 .cm-panels {
   z-index: 50;
@@ -363,6 +386,10 @@ button.link.danger { color: #d13438; }
   display: flex;
   align-items: center;
   gap: 4px;
+  /* Band 1: document furniture. It had no z-index at all, which left it
+     competing on paint order alone against anything else that lacked one. */
+  position: relative;
+  z-index: 20;
   padding: 5px 10px;
   background: var(--chrome);
   border-bottom: 1px solid var(--chrome-border);
@@ -402,7 +429,7 @@ button.link.danger { color: #d13438; }
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 60;
+  z-index: 200;
 }
 .modal {
   width: 460px;
@@ -455,7 +482,7 @@ button.link.danger { color: #d13438; }
   padding: 7px 18px;
   font-size: 13px;
   box-shadow: var(--shadow);
-  z-index: 70;
+  z-index: 220;
 }
 
 .muted { color: var(--muted); }
@@ -866,7 +893,7 @@ html[data-theme='dark'] .ok-text { color: #6bd396; }
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 80;
+  z-index: 210;
   pointer-events: none;
 }
 .drop-card {
@@ -943,7 +970,7 @@ html[data-theme='dark'] .ok-text { color: #6bd396; }
   flex: 0 0 auto;
   user-select: none;
   position: relative;
-  z-index: 60;
+  z-index: 100;
 }
 
 .menu-root { position: relative; display: flex; }
@@ -976,7 +1003,7 @@ html[data-theme='dark'] .ok-text { color: #6bd396; }
   border-radius: 8px;
   box-shadow: var(--shadow);
   padding: 5px;
-  z-index: 70;
+  z-index: 101;
 }
 
 .menu-item {

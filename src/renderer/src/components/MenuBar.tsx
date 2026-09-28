@@ -181,13 +181,19 @@ function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
     {
       label: 'AI',
       items: [
+        { label: 'Ask your documents', action: 'ai:toggle', accelerator: 'Ctrl+Shift+A' },
+        { separator: true, label: '' },
         /*
-         * The quick actions the native menu listed - summarise, explain,
-         * suggest annotations - are not handled anywhere and never were.
-         * A menu item that does nothing is worse than an absent one, so they
-         * are out until the actions behind them exist.
+         * The quick actions, which are also chips inside the panel.
+         *
+         * The native menu listed these against actions nothing handled, so
+         * they were removed rather than left dead. They are back now that
+         * `ai:quick:*` opens the panel and runs the matching action.
          */
-        { label: 'Ask your documents', action: 'ai:toggle', accelerator: 'Ctrl+Shift+A' }
+        { label: 'Summarise', action: 'ai:quick:summarise' },
+        { label: 'Compare documents', action: 'ai:quick:compare' },
+        { label: 'Explain selection', action: 'ai:quick:explain' },
+        { label: 'Suggest annotations', action: 'ai:quick:annotate' }
       ]
     },
     {
