@@ -930,3 +930,140 @@ html[data-theme='dark'] .ok-text { color: #6bd396; }
 
 /* Nothing in the panel may push it horizontally. */
 .ai-panel, .ai-panel .ai-scroll { max-width: 100%; overflow-x: hidden; }
+
+/* ------------------------------------------------------------ reader mode */
+
+/*
+ * Reading is a different job from editing, so it gets its own page rather
+ * than a tweak of the editing one. The palette, measure, size and leading all
+ * come in as custom properties set by lib/reader.ts, which keeps the
+ * combinations out of the stylesheet: four widths times four sizes times five
+ * palettes is not a set of rules anyone should maintain by hand.
+ *
+ * Everything is scoped to html[data-reader] so leaving reader mode restores
+ * the ordinary interface with no cleanup beyond removing the attribute.
+ */
+html[data-reader] body {
+  background: var(--reader-bg);
+}
+
+/* The chrome goes away. Reading is the whole point of the mode. */
+html[data-reader] .toolbar,
+html[data-reader] .menubar,
+html[data-reader] .sidebar,
+html[data-reader] .statusbar {
+  display: none;
+}
+
+html[data-reader] .viewer,
+html[data-reader] .preview-host {
+  background: var(--reader-bg);
+}
+
+html[data-reader] .markdown-body {
+  max-width: var(--reader-width);
+  margin: 0 auto;
+  padding: 72px 28px 45vh;
+  font-size: var(--reader-size);
+  line-height: var(--reader-leading);
+  color: var(--reader-fg);
+  /* Prose, not interface. The editor font is deliberately not used here. */
+  font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+}
+
+html[data-reader] .markdown-body h1,
+html[data-reader] .markdown-body h2,
+html[data-reader] .markdown-body h3,
+html[data-reader] .markdown-body h4 {
+  color: var(--reader-fg);
+  line-height: 1.25;
+  border-color: var(--reader-rule);
+}
+
+html[data-reader] .markdown-body a { color: var(--reader-link); }
+html[data-reader] .markdown-body hr { border-color: var(--reader-rule); }
+
+html[data-reader] .markdown-body blockquote {
+  border-left-color: var(--reader-rule);
+  background: transparent;
+  color: var(--reader-muted);
+}
+
+/* Code stays monospaced. Setting code in a serif face to match the prose
+   makes it harder to read, which is the opposite of the intent here. */
+html[data-reader] .markdown-body code,
+html[data-reader] .markdown-body pre {
+  background: var(--reader-raised);
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 0.86em;
+}
+
+html[data-reader] .markdown-body th {
+  background: var(--reader-raised);
+  color: var(--reader-fg);
+}
+
+html[data-reader] .markdown-body th,
+html[data-reader] .markdown-body td {
+  border-color: var(--reader-rule);
+}
+
+html[data-reader] .markdown-body img { max-width: 100%; }
+
+/* --------------------------------------------------------- reader controls */
+
+.reader-bar {
+  position: fixed;
+  z-index: 60;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 12px;
+  background: var(--chrome);
+  border: 1px solid var(--chrome-border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  /*
+   * Out of the way until wanted. The controls are for occasional adjustment,
+   * and a permanently solid bar floating over the text is exactly the kind of
+   * chrome this mode exists to remove.
+   */
+  opacity: 0.35;
+  transition: opacity 120ms ease;
+}
+.reader-bar:hover,
+.reader-bar:focus-within { opacity: 1; }
+
+.reader-bar button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.reader-bar button:hover:not(:disabled) { background: var(--hover); }
+.reader-bar button:disabled { opacity: 0.35; cursor: default; }
+.reader-bar button.on { background: var(--accent); color: #fff; }
+.reader-bar .sep { width: 1px; height: 22px; background: var(--chrome-border); margin: 0 3px; }
+.reader-bar .group { display: flex; align-items: center; gap: 2px; }
+.reader-bar .label {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 4px;
+  min-width: 52px;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+@media (max-width: 720px) {
+  .reader-bar { left: 12px; right: 12px; transform: none; justify-content: space-between; }
+  .reader-bar .label { display: none; }
+  html[data-reader] .markdown-body { padding: 48px 20px 45vh; }
+}

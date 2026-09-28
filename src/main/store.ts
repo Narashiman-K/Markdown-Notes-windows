@@ -28,6 +28,12 @@ export interface Settings {
    * not import from the renderer, where the BlockKind union is declared.
    */
   blockTints: string[]
+  /**
+   * Reading preferences: measure, text size, line spacing and palette.
+   * Loosely typed for the same reason as blockTints — this file runs in the
+   * main process and must not import from the renderer.
+   */
+  reader: { width: string; size: string; spacing: string; palette: string }
 }
 
 const DEFAULTS: Settings = {
@@ -42,7 +48,8 @@ const DEFAULTS: Settings = {
   aiProvider: 'ollama',
   aiModel: '',
   aiReviewChanges: true,
-  blockTints: ['codeBlock', 'blockquote']
+  blockTints: ['codeBlock', 'blockquote'],
+  reader: { width: 'medium', size: 'normal', spacing: 'normal', palette: 'auto' }
 }
 
 let cache: Settings | null = null

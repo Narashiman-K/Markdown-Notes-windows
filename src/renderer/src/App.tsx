@@ -34,6 +34,12 @@ import { wrapSelection, prefixLines, insertBlock, TABLE_SNIPPET, toFileUrl } fro
 import { DEFAULT_BLOCK_TINTS, type BlockKind } from './lib/blockTints'
 import { linkScrollers, previewScrollTarget, type ScrollSyncTarget } from './lib/syncScroll'
 import LivePreview, { type PreviewFormat } from './components/LivePreview'
+import ReaderControls from './components/ReaderControls'
+import {
+  applyReaderVariables,
+  DEFAULT_READER,
+  type ReaderSettings
+} from './lib/reader'
 import { ZOOM_LEVELS, type AnnotationType } from '../../shared/types'
 import markdownCss from './styles/markdown.css?inline'
 import hljsCss from 'highlight.js/styles/github.css?inline'
@@ -88,6 +94,8 @@ export default function App(): React.JSX.Element {
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY)
   const [reviewChanges, setReviewChanges] = useState(true)
   const [blockTints, setBlockTints] = useState<BlockKind[]>(() => [...DEFAULT_BLOCK_TINTS])
+  const [readerOn, setReaderOn] = useState(false)
+  const [reader, setReader] = useState<ReaderSettings>(DEFAULT_READER)
   /*
    * State, not refs.
    *
@@ -114,6 +122,22 @@ export default function App(): React.JSX.Element {
   const editorRef = useRef<EditorHandle>(null)
 
   const dark = theme === 'dark' || (theme === 'system' && systemDark)
+
+  /*
+   * Reading variables live on the root element, so they have to be
+   * re-applied whenever the palette's meaning could change. `auto` resolves
+   * against the app's own light or dark state, which is why `dark` is a
+   * dependency: the whole point of that setting is that it follows the
+   * device.
+   */
+  useEffect(() => {
+    applyReaderVariables(readerOn, reader, dark)
+  }, [readerOn, reader, dark])
+
+  const changeReader = useCallback((next: ReaderSettings) => {
+    setReader(next)
+    void window.api.setSettings({ reader: next })
+  }, [])
 
   /*
    * Join the editor and the live preview once both are on screen.
@@ -546,6 +570,16 @@ export default function App(): React.JSX.Element {
           else editorRef.current?.openSearch()
           return
 
+        case 'view:reader':
+          /*
+           * Reading implies view mode. Entering it from the editor and
+           * leaving the source visible underneath would be a mode within a
+           * mode, and the chrome that gets hidden includes the editor's own.
+           */
+          setMode('view')
+          setReaderOn((on) => !on)
+          return
+
         case 'view:mode:view':
           setMode('view')
           return
@@ -768,6 +802,7 @@ export default function App(): React.JSX.Element {
       // Absent means the setting predates this feature, which is not the same
       // as an empty array — that is a deliberate "tint nothing".
       if (Array.isArray(s?.blockTints)) setBlockTints(s.blockTints as BlockKind[])
+      if (s?.reader) setReader({ ...DEFAULT_READER, ...(s.reader as Partial<ReaderSettings>) })
     })
 
     // Track the current selection so the AI panel can explain it.
@@ -862,8 +897,12 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       if (e.key === 'Escape') {
+        // Innermost thing first: a dialog, then find, then reader mode. Escape
+        // should peel one layer, not drop the reader out of the document
+        // because a dialog happened to be open over it.
         if (dialog) setDialog(null)
         else if (findOpen) setFindOpen(false)
+        else if (readerOn) setReaderOn(false)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -874,6 +913,13 @@ export default function App(): React.JSX.Element {
 
   return (
     <div className={`app ${dark ? 'dark' : 'light'}`}>
+      {readerOn && (
+        <ReaderControls
+          settings={reader}
+          onChange={changeReader}
+          onExit={() => setReaderOn(false)}
+        />
+      )}
       <Toolbar
         mode={mode}
         zoom={zoom}
