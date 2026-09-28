@@ -77,7 +77,7 @@ export function buildMenu(win: BrowserWindow, send: Send): void {
       submenu: [
         { label: 'View Mode', accelerator: 'CmdOrCtrl+Shift+V', click: () => send('view:mode:view') },
         { label: 'Edit Mode', accelerator: 'CmdOrCtrl+E', click: () => send('view:mode:edit') },
-        { label: 'Reader Mode', accelerator: 'CmdOrCtrl+Shift+R', click: () => send('view:reader') },
+        { label: 'Reader Mode', accelerator: 'F9', click: () => send('view:reader') },
         { type: 'separator' },
         { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => send('view:zoom:in') },
         { label: 'Zoom In ', accelerator: 'CmdOrCtrl+=', visible: false, click: () => send('view:zoom:in') },
