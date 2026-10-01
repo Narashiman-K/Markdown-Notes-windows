@@ -20,7 +20,7 @@
 import * as pdfjs from 'pdfjs-dist'
 import type { ConvertResult, ConvertOptions } from './types'
 import { titleFrom, tidy } from './normalise'
-import { openOfflineReader, type OfflineReader } from './ocr'
+import { openOfflineReader, unreadableWarning, UNREADABLE_CONFIDENCE, type OfflineReader } from './ocr'
 import { CloudCaller } from './cloudRetry'
 
 /** Pixels across an A4 page at 300 dpi, the width pages are scaled towards. */
@@ -151,13 +151,14 @@ export async function ocrScannedPdf(
       const which = offlinePages.length === pages ? 'Every page was' : `Page${offlinePages.length > 1 ? 's' : ''} ${offlinePages.join(', ')} ${offlinePages.length > 1 ? 'were' : 'was'}`
       note += ` ${which} read offline because the cloud service was unavailable (${cloudGaveUp ?? 'no reason given'}).`
     }
-    if (confidence !== undefined && confidence < 70) {
+    const unreadable = confidence !== undefined && confidence < UNREADABLE_CONFIDENCE
+    if (confidence !== undefined && confidence < 70 && !unreadable) {
       note += ' Offline OCR reported low confidence; cloud OCR would likely read it more accurately.'
     }
 
     return {
       ok: true,
-      markdown: tidy(parts) + note,
+      markdown: (unreadable ? unreadableWarning(confidence!) : '') + tidy(parts) + note,
       meta: {
         engine: allCloud ? 'gemini' : allOffline ? 'tesseract' : 'gemini+tesseract',
         pages,

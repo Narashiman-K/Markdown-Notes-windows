@@ -78,6 +78,27 @@ function localPaths(): { workerPath: string; corePath: string; langPath: string;
   }
 }
 
+/**
+ * Below this, an offline OCR result is treated as unreadable, not merely rough.
+ *
+ * Measured, not chosen: clean English printed text reads at 95%, while Hindi
+ * read with the English model came back at 33% and Kannada at 22%, both as
+ * meaningless Latin letters. Real but blurry English scans land between 60 and
+ * 75, and keep only the milder note. Until multilingual OCR exists, a result
+ * under this line was almost always a different language or script.
+ */
+export const UNREADABLE_CONFIDENCE = 60
+
+/** Shown at the very top of a result that is very probably nonsense. */
+export function unreadableWarning(confidence: number): string {
+  return (
+    `> **This result is probably not readable.** Offline OCR was only ${confidence}% confident. ` +
+    'It currently reads English only, so text in other languages, such as Kannada or Hindi, ' +
+    'comes out as meaningless letters. Convert this document again with **Cloud** OCR selected, ' +
+    'or wait for multilingual offline OCR.\n\n'
+  )
+}
+
 /** One loaded Tesseract engine, reusable across many images. */
 export interface OfflineReader {
   /** Reads one image. `onFraction` receives 0–1 progress for this image alone. */
@@ -168,9 +189,10 @@ async function offlineOcr(
         ? '\n\n> **Note:** offline OCR reported low confidence on this image. Cloud OCR would likely read it more accurately.'
         : ''
 
+    const top = confidence < UNREADABLE_CONFIDENCE ? unreadableWarning(confidence) : ''
     return {
       ok: true,
-      markdown: tidy([`# ${titleFrom(fileName)}`, text]) + warning,
+      markdown: top + tidy([`# ${titleFrom(fileName)}`, text]) + (top ? '' : warning),
       meta: { engine: 'tesseract', confidence }
     }
   } finally {
