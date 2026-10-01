@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { convertToMarkdown, FORMAT_GROUPS, extensionOf, needsOcr, needsTranscription } from '../lib/convert'
+import Loader from './Loader'
 
 interface QueueItem {
   input: string
@@ -465,6 +466,7 @@ export default function ConvertDialog(props: Props): React.JSX.Element {
 
         {busy && progress && (
           <p className="muted small progress-line">
+            <Loader size={22} inline />
             {progress}
             {jobId && (
               <button

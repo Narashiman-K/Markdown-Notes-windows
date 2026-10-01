@@ -17,8 +17,39 @@
       Free for personal use. Not licensed for commercial use.
       mn-signature: Narashiman Krishnamurthy
     -->
+    <!--
+      Start-up splash: the animated logo, shown from the first paint until the
+      interface has drawn, then faded out by main.tsx. Styled inline because
+      app.css only arrives with the script bundle, which is exactly the wait
+      this covers. Backgrounds match the window colour the app opens with, so
+      nothing flashes between splash and interface.
+    -->
+    <style>
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 1000; /* above everything, including the window-level band (200+) */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #ffffff;
+        transition: opacity 0.25s ease;
+      }
+      #boot-splash.gone { opacity: 0; pointer-events: none; }
+      #boot-splash img { width: 72px; height: 86px; }
+      #boot-splash .on-dark { display: none; }
+      @media (prefers-color-scheme: dark) {
+        #boot-splash { background: #1f1f1f; }
+        #boot-splash .on-dark { display: block; }
+        #boot-splash .on-light { display: none; }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot-splash" role="status" aria-label="Loading">
+      <img class="on-light" src="./src/assets/preloader/loader-on-light.svg" alt="" />
+      <img class="on-dark" src="./src/assets/preloader/loader-on-dark.svg" alt="" />
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

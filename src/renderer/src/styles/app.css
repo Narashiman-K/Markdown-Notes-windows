@@ -1299,3 +1299,36 @@ html[data-reader] .markdown-body img { max-width: 100%; }
   .reader-row { flex-direction: row; align-items: center; }
   html[data-reader] .markdown-body { padding: 48px 20px 45vh; }
 }
+
+/* ------------------------------------------------------------------ loader */
+
+/*
+ * The animated logo shown while something slow is happening. Both theme
+ * variants are in the DOM; the theme picks one. See components/Loader.tsx.
+ */
+.loader {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.loader.inline {
+  flex-direction: row;
+  gap: 10px;
+  vertical-align: middle;
+}
+.loader-img { display: block; flex: 0 0 auto; }
+.loader-on-dark { display: none; }
+.app.dark .loader-on-dark { display: block; }
+.app.dark .loader-on-light { display: none; }
+.loader-label { font-size: 13px; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

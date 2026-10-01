@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildContext, extractCitations, type Chunk, type SourceDoc } from '../lib/retrieval'
 import { systemPrompt, parseAnnotations, parseRevision, QUICK_ACTIONS, type AiMode } from '../lib/aiPrompts'
 import { renderMarkdown } from '../lib/markdown'
+import Loader from './Loader'
 
 type ProviderId = 'ollama' | 'anthropic' | 'openai' | 'gemini'
 
@@ -456,7 +457,7 @@ export default function AiPanel(props: AiPanelProps): React.JSX.Element {
         {busy && (
           <div className="ai-turn assistant">
             <span className="thinking">
-              Reading your documents<span className="dots">…</span>
+              <Loader size={26} inline label="Reading your documents…" />
             </span>
           </div>
         )}
