@@ -27,6 +27,12 @@ export default function Toolbar(props: Props): React.JSX.Element {
         {btn('file:print', '🖨', 'Print… (Ctrl+P)')}
       </div>
 
+      {/* Labelled rather than an icon alone: merging is new, and a word says
+          what it does where a symbol would have to be learned. */}
+      <div className="tb-group">
+        {btn('file:merge', '⧉ Merge docs', 'Merge files: combine several documents into one', 'tb-text')}
+      </div>
+
       <div className="tb-group">
         <div className="segmented">
           <button

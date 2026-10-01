@@ -88,6 +88,7 @@ function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
         { label: 'Export without annotations…', action: 'file:export:clean' },
         { separator: true, label: '' },
         { label: 'Convert to Markdown…', action: 'convert:open', accelerator: 'Ctrl+Shift+M' },
+        { label: 'Merge files…', action: 'file:merge' },
         { label: 'Converter settings…', action: 'convert:settings' },
         { separator: true, label: '' },
         { label: 'Print…', action: 'file:print', accelerator: 'Ctrl+P' },

@@ -1333,3 +1333,14 @@ html[data-reader] .markdown-body img { max-width: 100%; }
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* ------------------------------------------------------------------ merge */
+
+.merge-list { max-height: 260px; }
+.merge-order { width: 1.4em; text-align: right; flex: 0 0 auto; }
+.merge-empty { padding: 14px 12px; }
+.merge-add { margin: 8px 0 4px; }
+.merge-list .convert-row .link:disabled { opacity: 0.3; cursor: default; }
+
+/* A toolbar button with a word on it, not just an icon (Merge docs). */
+.tb.tb-text { font-size: 13px; padding-left: 10px; padding-right: 10px; white-space: nowrap; }

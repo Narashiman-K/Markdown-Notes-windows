@@ -7,6 +7,7 @@ import FindBar from './components/FindBar'
 import NoteDialog from './components/NoteDialog'
 import AboutDialog from './components/AboutDialog'
 import ConvertDialog from './components/ConvertDialog'
+import MergeDialog from './components/MergeDialog'
 import AiPanel from './components/AiPanel'
 import DiffDialog from './components/DiffDialog'
 import { installSignature, signatureComment } from './lib/signature'
@@ -88,6 +89,7 @@ export default function App(): React.JSX.Element {
   const [toast, setToast] = useState<string | null>(null)
   const [showAbout, setShowAbout] = useState(false)
   const [convertSeed, setConvertSeed] = useState<string[] | null>(null)
+  const [mergeOpen, setMergeOpen] = useState(false)
   const [appDragging, setAppDragging] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
   // A quick action chosen from the AI menu, waiting for the panel to pick it
@@ -538,6 +540,9 @@ export default function App(): React.JSX.Element {
           return
         case 'convert:open':
           setConvertSeed([])
+          return
+        case 'file:merge':
+          setMergeOpen(true)
           return
         case 'ai:toggle':
           setAiOpen((v) => !v)
@@ -1129,6 +1134,37 @@ export default function App(): React.JSX.Element {
             }
             setPendingDiff(null)
             flash(`${pendingDiff.label} applied. Ctrl+Z to undo.`)
+          }}
+        />
+      )}
+
+      {mergeOpen && (
+        <MergeDialog
+          current={content.trim() ? { name: fileName, markdown: content } : null}
+          pickFiles={async () => {
+            const r = await window.api.convertPickInput()
+            if (!r.ok || !r.filePaths) return []
+            return Promise.all(
+              r.filePaths.map(async (path: string) => ({
+                name: await window.api.basename(path),
+                read: async () => {
+                  const b = await window.api.readBytes(path)
+                  if (!b.ok) throw new Error(b.error ?? 'Could not read the file.')
+                  return new Uint8Array(b.bytes)
+                }
+              }))
+            )
+          }}
+          onClose={() => setMergeOpen(false)}
+          onMerged={async (markdown, title) => {
+            // The merged result replaces the open document, so unsaved work
+            // gets the usual save-or-discard question first.
+            if (!(await guardUnsaved())) return
+            setMergeOpen(false)
+            loadDocument(null, markdown)
+            setFileName(title)
+            setDirty(true)
+            flash('Files merged into a new document. Save it to keep it (Ctrl+S).')
           }}
         />
       )}
