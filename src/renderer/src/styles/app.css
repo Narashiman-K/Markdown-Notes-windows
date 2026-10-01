@@ -724,6 +724,7 @@ html[data-theme='dark'] .ok-text { color: #6bd396; }
   flex: 0 0 auto;
 }
 .status-strip.good .dot-status { background: #2e9e5b; }
+.status-strip.bad .dot-status { background: #d9822b; }
 
 .ai-settings {
   padding: 10px 12px;

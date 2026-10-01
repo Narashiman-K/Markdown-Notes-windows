@@ -183,7 +183,9 @@ export async function convertImage(
   fileName: string,
   options: ConvertOptions = {}
 ): Promise<ConvertResult> {
-  const mode = options.ocrMode ?? 'cloud'
+  // Offline unless a caller asks for the cloud explicitly. Nothing should
+  // reach a third party because an option was left unset.
+  const mode = options.ocrMode ?? 'offline'
 
   if (mode === 'offline') {
     return offlineOcr(bytes, fileName, options.onProgress)
