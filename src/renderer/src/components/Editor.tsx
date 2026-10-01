@@ -22,6 +22,7 @@ import type { TextEdit } from '../lib/editing'
 import { blockTints, DEFAULT_BLOCK_TINTS, type BlockKind } from '../lib/blockTints'
 import type { ScrollSyncTarget } from '../lib/syncScroll'
 import { smartPaste } from '../lib/smartPaste'
+import { foldDataUrls } from '../lib/dataUrls'
 
 export interface EditorHandle {
   getSelection: () => { from: number; to: number }
@@ -193,6 +194,7 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
       search({ top: true }),
       tintCompartment.of(blockTints(tintKindsRef.current, dark)),
       smartPaste(),
+      foldDataUrls(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
