@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { BUILT_IN_OCR_LANGUAGES, normaliseOcrLanguages, describeOcrLanguages, tidyOcrText } from '../src/renderer/src/lib/ocrLanguages'
+import { BUILT_IN_OCR_LANGUAGES, normaliseOcrLanguages, describeOcrLanguages, tidyOcrText, keepOcrLineBreaks } from '../src/renderer/src/lib/ocrLanguages'
 // @ts-expect-error — a plain .mjs build script, imported for its list only
 import { LANGUAGES } from '../scripts/tesseract-assets.mjs'
 
@@ -35,5 +35,19 @@ describe('tidyOcrText', () => {
     expect(tidyOcrText('೧೦ ಮತ್ತು ೦')).toBe('೧೦ ಮತ್ತು ೦')
     expect(tidyOcrText('१०० रुपये')).toBe('१०० रुपये')
     expect(tidyOcrText('Room 10')).toBe('Room 10')
+  })
+})
+
+describe('keepOcrLineBreaks', () => {
+  it('ends every continuing line of a paragraph with a hard break', () => {
+    expect(keepOcrLineBreaks('Key figures:\nTotal revenue 4,820,000\nOpen incidents 7')).toBe(
+      'Key figures:\\\nTotal revenue 4,820,000\\\nOpen incidents 7'
+    )
+  })
+  it('keeps paragraphs apart and drops runs of blank lines', () => {
+    expect(keepOcrLineBreaks('One\ntwo\n\n\n\nThree')).toBe('One\\\ntwo\n\nThree')
+  })
+  it('leaves single lines and trailing spaces tidy', () => {
+    expect(keepOcrLineBreaks('Alone   ')).toBe('Alone')
   })
 })

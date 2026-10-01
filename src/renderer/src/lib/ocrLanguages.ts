@@ -60,3 +60,28 @@ export function tidyOcrText(text: string): string {
     .replace(/(?<=[\u0C80-\u0CE3])\u0CE6/g, '\u0C82') // Kannada
     .replace(/(?<=[\u0900-\u0963])\u0966/g, '\u0902') // Devanagari (Hindi)
 }
+
+/**
+ * Keeps the page's own line breaks in text read by OCR.
+ *
+ * Markdown joins the lines of a paragraph into one, so a scanned list such as
+ * "Key figures: / Total revenue 4,820,000 / Operating margin 18 percent" ran
+ * together into a single line, unlike the page it came from. Each line that
+ * continues a paragraph now ends in a backslash, Markdown's hard line break,
+ * which survives saving (trailing spaces, the other way, are stripped). Blank
+ * lines between paragraphs stay as they are.
+ */
+export function keepOcrLineBreaks(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((para) =>
+      para
+        .split('\n')
+        .map((line) => line.trimEnd())
+        .filter((line) => line.length > 0)
+        .map((line, i, all) => (i < all.length - 1 && !line.endsWith('\\') ? `${line}\\` : line))
+        .join('\n')
+    )
+    .filter((para) => para.length > 0)
+    .join('\n\n')
+}

@@ -17,7 +17,7 @@
 import type { ConvertResult, ConvertOptions } from './types'
 import { extensionOf } from './types'
 import { titleFrom, tidy } from './normalise'
-import { normaliseOcrLanguages, describeOcrLanguages, tidyOcrText } from '../ocrLanguages'
+import { normaliseOcrLanguages, describeOcrLanguages, tidyOcrText, keepOcrLineBreaks } from '../ocrLanguages'
 
 const MIME: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -158,7 +158,7 @@ export async function openOfflineReader(
       try {
         const { data } = await worker.recognize(image)
         return {
-          text: tidyOcrText(data.text ?? '').replace(/\n{3,}/g, '\n\n').trim(),
+          text: keepOcrLineBreaks(tidyOcrText(data.text ?? '')).trim(),
           confidence: Math.round(data.confidence ?? 0)
         }
       } finally {
