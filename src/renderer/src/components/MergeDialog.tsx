@@ -18,7 +18,7 @@
  */
 import { useState } from 'react'
 import { convertToMarkdown, extensionOf, needsTranscription } from '../lib/convert'
-import { mergeDocuments, type MergeMode } from '../lib/merge'
+import { mergeDocuments, isMerged, type MergeMode } from '../lib/merge'
 import Loader from './Loader'
 
 /** A file the platform can hand over: its name, and its bytes on demand. */
@@ -84,8 +84,16 @@ export default function MergeDialog(props: Props): JSX.Element {
 
   const remove = (i: number): void => setItems((list) => list.filter((_, n) => n !== i))
 
+  /*
+   * Two or more items, or a single merged document: that already holds
+   * several files, and merging it alone re-joins them the other way, switching
+   * between sections and unchanged without adding anything.
+   */
+  const reshape = items.length === 1 && items[0].markdown !== undefined && isMerged(items[0].markdown)
+  const canMerge = items.length >= 2 || reshape
+
   const merge = async (): Promise<void> => {
-    if (items.length < 2 || busy) return
+    if (!canMerge || busy) return
     setBusy(true)
     const working: Item[] = items.map((it) => ({ ...it, status: 'waiting', error: undefined }))
     const parts: Array<{ name: string; markdown: string }> = []
@@ -129,6 +137,13 @@ export default function MergeDialog(props: Props): JSX.Element {
     // count carries on rather than the name growing "(merged) + 1 more
     // (merged)" with every round.
     const firstName = parts[0].name.replace(/\.[^.]+$/, '')
+    // Re-joining a merged document on its own keeps its name.
+    if (reshape) {
+      setBusy(false)
+      setProgress('')
+      props.onMerged(merged, firstName, true)
+      return
+    }
     const earlier = /^(.*) \+ (\d+) more \(merged\)$/.exec(firstName)
     const first = earlier ? earlier[1] : firstName
     const more = (earlier ? Number(earlier[2]) : 0) + parts.length - 1
@@ -221,8 +236,8 @@ export default function MergeDialog(props: Props): JSX.Element {
           <button onClick={props.onClose} disabled={busy}>
             Cancel
           </button>
-          <button className="primary" disabled={items.length < 2 || busy} onClick={() => void merge()}>
-            {busy ? 'Merging…' : items.length < 2 ? 'Merge' : `Merge ${items.length} files`}
+          <button className="primary" disabled={!canMerge || busy} onClick={() => void merge()}>
+            {busy ? 'Merging…' : reshape ? 'Re-join' : items.length < 2 ? 'Merge' : `Merge ${items.length} files`}
           </button>
         </div>
       </div>
