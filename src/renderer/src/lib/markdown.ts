@@ -204,10 +204,15 @@ export function setLocalImageResolver(resolver: ((fileUrl: string) => string) | 
 
 export function renderMarkdown(
   source: string,
-  options?: { sourceLines?: boolean; screen?: boolean; pages?: boolean }
+  options?: { sourceLines?: boolean; screen?: boolean; pages?: boolean; hideScans?: boolean }
 ): string {
   // `pages`: each original page in a sheet of its own (see lib/pages.ts).
-  const html = md.render(source, { sourceLines: options?.sourceLines === true, pages: options?.pages === true })
+  // `hideScans`: leave out scanned pages' own pictures, showing only their text.
+  const html = md.render(source, {
+    sourceLines: options?.sourceLines === true,
+    pages: options?.pages === true,
+    hideScans: options?.hideScans === true
+  })
   installFileLinkHook()
   const clean = DOMPurify.sanitize(html, PURIFY_CONFIG) as unknown as string
   const resolve = options?.screen ? localImageResolver : null

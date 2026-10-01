@@ -7,6 +7,11 @@ interface Props {
   fileName: string
   sidebar: 'none' | 'outline' | 'comments'
   aiOpen: boolean
+  /**
+   * Scanned pages' own pictures: 'none' when the document keeps none, and the
+   * button is not shown; otherwise whether they are showing.
+   */
+  scans?: 'none' | 'shown' | 'hidden'
   onAction: (action: string) => void
 }
 
@@ -31,6 +36,15 @@ export default function Toolbar(props: Props): React.JSX.Element {
           what it does where a symbol would have to be learned. */}
       <div className="tb-group">
         {btn('file:merge', '⧉ Merge docs', 'Merge files: combine several documents into one', 'tb-text')}
+        {props.scans && props.scans !== 'none' &&
+          btn(
+            'view:scans',
+            '🖼 Originals',
+            props.scans === 'shown'
+              ? 'Hide the original page pictures and show only the converted text'
+              : 'Show the original page pictures beside the converted text, to compare',
+            `tb-text${props.scans === 'shown' ? ' on' : ''}`
+          )}
       </div>
 
       <div className="tb-group">

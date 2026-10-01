@@ -42,6 +42,8 @@ interface Props {
   theme: 'light' | 'dark' | 'system'
   /** Ticks View > Page view. */
   pageView?: boolean
+  /** Ticks View > Original page pictures. */
+  scansShown?: boolean
 }
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() ?? p
@@ -51,7 +53,7 @@ const dirname = (p: string): string => {
   return parts.join('\\') || p
 }
 
-function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean): Menu[] {
+function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, scansShown: boolean): Menu[] {
   /*
    * Recent files are listed inline rather than in a submenu. The native menu
    * nested them, but one level of nesting for a list this short buys nothing
@@ -115,7 +117,9 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean):
          */
         { label: 'Select all', action: 'edit:selectAll', accelerator: 'Ctrl+A' },
         { separator: true, label: '' },
-        { label: 'Find…', action: 'edit:find', accelerator: 'Ctrl+F' }
+        { label: 'Find…', action: 'edit:find', accelerator: 'Ctrl+F' },
+        { separator: true, label: '' },
+        { label: 'Remove original page pictures', action: 'edit:removeScans' }
       ]
     },
     {
@@ -125,6 +129,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean):
         { label: 'Edit mode', action: 'view:mode:edit', accelerator: 'Ctrl+E' },
         { label: 'Reader mode', action: 'view:reader', accelerator: 'F9' },
         { label: 'Page view', action: 'view:pages', checked: pageView },
+        { label: 'Original page pictures', action: 'view:scans', checked: scansShown },
         { separator: true, label: '' },
         { label: 'Zoom in', action: 'view:zoom:in', accelerator: 'Ctrl++' },
         { label: 'Zoom out', action: 'view:zoom:out', accelerator: 'Ctrl+-' },
@@ -216,7 +221,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean):
   ]
 }
 
-export default function MenuBar({ onAction, recentFiles, theme, pageView = false }: Props): React.JSX.Element {
+export default function MenuBar({ onAction, recentFiles, theme, pageView = false, scansShown = false }: Props): React.JSX.Element {
   const [open, setOpen] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -278,7 +283,7 @@ export default function MenuBar({ onAction, recentFiles, theme, pageView = false
     onAction(action)
   }
 
-  const all = menus(recentFiles, theme, pageView)
+  const all = menus(recentFiles, theme, pageView, scansShown)
 
   return (
     <div className="menubar" ref={ref}>

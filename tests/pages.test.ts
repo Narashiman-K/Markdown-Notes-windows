@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { md, standaloneHtml } from '../src/renderer/src/lib/markdown'
-import { PAGE_BREAK, pageSizeLine, pageSizeName, readPageSize, sheetStyle } from '../src/renderer/src/lib/pages'
+import { PAGE_BREAK, pageSizeLine, pageSizeName, readPageSize, sheetStyle, hasScans, removeScans } from '../src/renderer/src/lib/pages'
 import { mergeDocuments } from '../src/renderer/src/lib/merge'
 
 /* Rendered without DOMPurify, which needs a window: the rule under test runs
@@ -116,5 +116,35 @@ describe('printing', () => {
     expect(standaloneHtml('r', '', '', true, null)).toContain('@page { margin')
     // Exported HTML is not paper; it carries no page rule at all.
     expect(standaloneHtml('r', '', '', false, size)).not.toContain('@page')
+  })
+})
+
+describe('original page pictures: hiding and removing', () => {
+  const source = ['# Scan', '## Page 1', scan(1), 'Read text one.', PAGE_BREAK, '## Page 2', scan(2), 'Read text two.'].join('\n\n')
+
+  it('knows whether a document keeps any', () => {
+    expect(hasScans(source)).toBe(true)
+    expect(hasScans('![chart](data:image/png;base64,AAAA "A chart")')).toBe(false)
+  })
+
+  it('hidden: only the text is drawn, on single sheets, and the file is untouched', () => {
+    const html = md.render(source, { pages: true, hideScans: true })
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('mn-sheet-pair')
+    expect(html.match(/<section class="mn-sheet">/g)).toHaveLength(2)
+    expect(html).toContain('Read text two.')
+  })
+
+  it('removed: the pictures leave the file and the text stays', () => {
+    const { markdown, removed } = removeScans(source)
+    expect(removed).toBe(2)
+    expect(hasScans(markdown)).toBe(false)
+    expect(markdown).not.toMatch(/\n{3,}/)
+    expect(markdown).toBe(['# Scan', '## Page 1', 'Read text one.', PAGE_BREAK, '## Page 2', 'Read text two.'].join('\n\n'))
+  })
+
+  it('removes nothing else, and reports when there was nothing', () => {
+    const other = '# Doc\n\n![chart](data:image/png;base64,AAAA "A chart")'
+    expect(removeScans(other)).toEqual({ markdown: other, removed: 0 })
   })
 })

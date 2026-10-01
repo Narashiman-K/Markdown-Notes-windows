@@ -676,6 +676,9 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('dialog:confirmUnsaved', async (_e, args: { name: string }) => {
+    // The test harness runs in a throwaway profile and cannot click a dialog;
+    // a real one would stall the run. Its edits are never worth keeping.
+    if (harness) return 'discard'
     const r = await dialog.showMessageBox(mainWindow!, {
       type: 'warning',
       buttons: ['Save', "Don't Save", 'Cancel'],

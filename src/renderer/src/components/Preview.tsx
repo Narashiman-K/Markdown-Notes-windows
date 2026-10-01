@@ -35,6 +35,8 @@ interface Props {
    * page (lib/pages.ts). A4 for a document that recorded no size.
    */
   pageView?: boolean
+  /** Leave out scanned pages' own pictures, showing only their text. */
+  hideScans?: boolean
 }
 
 interface ToolbarState {
@@ -54,7 +56,8 @@ const Preview = forwardRef<PreviewHandle, Props>(function Preview(props, ref) {
 
   // Never while reading: the reader sets its own width and size.
   const pages = props.pageView === true && !props.readerMode
-  const html = useMemo(() => renderMarkdown(source, { screen: true, pages }), [source, pages])
+  const hideScans = props.hideScans === true
+  const html = useMemo(() => renderMarkdown(source, { screen: true, pages, hideScans }), [source, pages, hideScans])
   const sheet = useMemo(() => (pages ? sheetStyle(readPageSize(source)) : null), [source, pages])
 
   // Re-index the rendered DOM whenever the document changes.

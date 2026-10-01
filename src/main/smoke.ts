@@ -500,6 +500,56 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
     await wait(600)
     const afterRedo = await js<number>(`document.querySelectorAll('mark.mn-highlight').length`)
     check('redo restores it', afterRedo === beforeUndo, `${afterUndo} -> ${afterRedo}`)
+
+    /*
+     * 15 — scanned pages' own pictures: beside the text in page view, hidden
+     * and shown again by the toolbar button, removed for good by
+     * Edit > Remove original page pictures, and put back by undo. Last,
+     * because it replaces the document the earlier steps work on.
+     */
+    mark('original page pictures')
+    win.webContents.send('menu:action', { action: 'file:openPath', payload: join(samples, 'scan-pages.md') })
+    await wait(1500)
+    const scans = (): Promise<string> =>
+      js<string>(`(() => {
+        const b = document.querySelector('.preview-host .markdown-body');
+        const btn = [...document.querySelectorAll('.toolbar button')].find(x => x.textContent.includes('Originals'));
+        return JSON.stringify({
+          pairs: b ? b.querySelectorAll('.mn-sheet-pair').length : -1,
+          sheets: b ? b.querySelectorAll('.mn-sheet').length : -1,
+          imgs: b ? b.querySelectorAll('img.mn-scan').length : -1,
+          button: btn ? (btn.classList.contains('on') ? 'on' : 'off') : 'none',
+          text: b ? b.textContent.includes('Second page text.') : false
+        });
+      })()`)
+    const clickOriginals = (): Promise<boolean> =>
+      js<boolean>(`(() => { const b = [...document.querySelectorAll('.toolbar button')].find(x => x.textContent.includes('Originals')); b?.click(); return !!b })()`)
+
+    const shown = JSON.parse(await scans())
+    check('page view opens with each original beside its text', shown.pairs === 2 && shown.imgs === 2 && shown.button === 'on', JSON.stringify(shown))
+    await win.webContents.capturePage().then(async (img) => {
+      await fsp.writeFile(join(outDir, '08-page-view-originals.png'), img.toPNG())
+    })
+
+    await clickOriginals()
+    await wait(500)
+    const hidden = JSON.parse(await scans())
+    check('Originals button hides the pictures, text stays', hidden.pairs === 0 && hidden.imgs === 0 && hidden.sheets === 2 && hidden.text && hidden.button === 'off', JSON.stringify(hidden))
+
+    await clickOriginals()
+    await wait(500)
+    const again = JSON.parse(await scans())
+    check('and shows them again', again.pairs === 2 && again.imgs === 2, JSON.stringify(again))
+
+    win.webContents.send('menu:action', { action: 'edit:removeScans' })
+    await wait(600)
+    const removed = JSON.parse(await scans())
+    check('Remove original page pictures leaves only the text', removed.imgs === 0 && removed.text && removed.button === 'none', JSON.stringify(removed))
+
+    win.webContents.send('menu:action', { action: 'edit:undo' })
+    await wait(600)
+    const back = JSON.parse(await scans())
+    check('undo puts the pictures back', back.imgs === 2, JSON.stringify(back))
   } catch (err) {
     check('unexpected error', false, String((err as Error)?.stack ?? err))
   }

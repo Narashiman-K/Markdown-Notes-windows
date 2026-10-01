@@ -85,6 +85,33 @@ export function sheetStyle(size: PageSize | null): Record<string, string> {
   return { '--mn-page-w': `${(s.width / 12).toFixed(2)}em`, '--mn-page-h': `${(s.height / 12).toFixed(2)}em` }
 }
 
+/* ------------------------------------------------------- page pictures */
+
+/** A line holding nothing but a scanned page's picture. */
+const SCAN_LINE = /^!\[[^\]\n]*\]\([^)\s]+\s+"suprasuta:scan"\)[ \t]*$/gm
+
+/** Whether the document keeps any scanned page's own picture. */
+export function hasScans(markdown: string): boolean {
+  SCAN_LINE.lastIndex = 0
+  return SCAN_LINE.test(markdown)
+}
+
+/**
+ * The document without its scanned pages' pictures: what is left is the text
+ * read from them, for when they have been checked and only the converted text
+ * is wanted. Counts what it removed, for the message.
+ */
+export function removeScans(markdown: string): { markdown: string; removed: number } {
+  let removed = 0
+  const out = markdown
+    .replace(SCAN_LINE, () => {
+      removed++
+      return ''
+    })
+    .replace(/\n{3,}/g, '\n\n')
+  return { markdown: removed ? out : markdown, removed }
+}
+
 /* ------------------------------------------------------------- renderer */
 
 function htmlBlock(state: { Token: typeof Token }, html: string): Token {
@@ -106,10 +133,8 @@ function isScanParagraph(tokens: Token[], i: number): boolean {
 
 export function pagesPlugin(md: MarkdownIt): void {
   md.core.ruler.push('suprasuta_pages', (state) => {
-    const tokens = state.tokens
-
     // The notes themselves: the size draws nothing, a break draws a divider.
-    for (const t of tokens) {
+    for (const t of state.tokens) {
       if (t.type !== 'html_block') continue
       const text = t.content.trim()
       if (SIZE_ONLY.test(text)) t.content = ''
@@ -121,7 +146,7 @@ export function pagesPlugin(md: MarkdownIt): void {
 
     // A scanned page's picture loses its marker title, which would otherwise
     // pop up as a tooltip, and gains a class the styles can find.
-    for (const t of tokens) {
+    for (const t of state.tokens) {
       if (t.type !== 'inline') continue
       for (const k of t.children ?? []) {
         if (k.type !== 'image' || k.attrGet('title') !== SCAN_TITLE) continue
@@ -131,7 +156,24 @@ export function pagesPlugin(md: MarkdownIt): void {
       }
     }
 
-    if (!(state.env as { pages?: boolean } | undefined)?.pages) return
+    const env = state.env as { pages?: boolean; hideScans?: boolean } | undefined
+
+    // Pictures hidden: the text alone, on screen and in print, with the
+    // pictures still in the file for when they are shown again.
+    if (env?.hideScans) {
+      const kept: Token[] = []
+      for (let i = 0; i < state.tokens.length; i++) {
+        if (isScanParagraph(state.tokens, i)) {
+          i += 2
+          continue
+        }
+        kept.push(state.tokens[i])
+      }
+      state.tokens = kept
+    }
+
+    if (!env?.pages) return
+    const tokens = state.tokens
 
     // Page view: each original page becomes a sheet.
     const sheets: Token[][] = [[]]

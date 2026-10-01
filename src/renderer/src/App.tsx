@@ -25,7 +25,7 @@ import {
   type HistoryState
 } from './lib/history'
 import { extractHeadings, documentStats, renderMarkdown, standaloneHtml } from './lib/markdown'
-import { readPageSize } from './lib/pages'
+import { readPageSize, hasScans, removeScans } from './lib/pages'
 import {
   applyAnnotation,
   listAnnotations,
@@ -90,6 +90,14 @@ export default function App(): React.JSX.Element {
   // The menu handler is a memoised callback; it reads this, not a stale copy.
   const pageViewRef = useRef(pageView)
   pageViewRef.current = pageView
+  /*
+   * Scanned pages' own pictures (Convert > Keep each scanned page's picture):
+   * shown beside the text to compare, or hidden to see, print and export the
+   * converted text alone. Hiding keeps them in the file; Edit > Remove
+   * original page pictures takes them out for good.
+   */
+  const [showScans, setShowScans] = useState(true)
+  const docHasScans = useMemo(() => hasScans(content), [content])
   useEffect(() => setPageViewChoice(null), [filePath, fileName])
   const [dirty, setDirty] = useState(false)
   const [mode, setMode] = useState<Mode>('view')
@@ -416,8 +424,15 @@ export default function App(): React.JSX.Element {
     (forPrint: boolean) =>
       signatureComment() +
       '\n' +
-      standaloneHtml(fileName, renderMarkdown(content), `${markdownCss}\n${hljsCss}`, forPrint, readPageSize(content)),
-    [content, fileName]
+      standaloneHtml(
+        fileName,
+        // Printed and exported as shown: without the page pictures while they are hidden.
+        renderMarkdown(content, { hideScans: !showScans }),
+        `${markdownCss}\n${hljsCss}`,
+        forPrint,
+        readPageSize(content)
+      ),
+    [content, fileName, showScans]
   )
 
   /* ----------------------------------------------------------- annotate */
@@ -655,6 +670,20 @@ export default function App(): React.JSX.Element {
           return
         }
 
+        case 'view:scans':
+          setShowScans((v) => !v)
+          break
+        case 'edit:removeScans': {
+          const { markdown, removed } = removeScans(content)
+          if (!removed) {
+            flash('This document has no original page pictures.')
+            break
+          }
+          commitContent(markdown, 'Remove original page pictures')
+          setShowScans(true)
+          flash(`Removed ${removed} original page picture${removed === 1 ? '' : 's'}. Ctrl+Z puts them back.`)
+          break
+        }
         case 'view:pages':
           setPageViewChoice(!pageViewRef.current)
           break
@@ -1025,6 +1054,7 @@ export default function App(): React.JSX.Element {
         recentFiles={recentFiles}
         theme={theme}
         pageView={pageView}
+        scansShown={docHasScans && showScans}
       />
       <Toolbar
         mode={mode}
@@ -1034,6 +1064,7 @@ export default function App(): React.JSX.Element {
         fileName={fileName}
         sidebar={sidebar}
         aiOpen={aiOpen}
+        scans={docHasScans ? (showScans ? 'shown' : 'hidden') : 'none'}
         onAction={(a) => void actionRef.current(a)}
       />
 
@@ -1073,6 +1104,7 @@ export default function App(): React.JSX.Element {
               activeAnnotation={activeId}
               readerMode={readerOn}
               pageView={pageView}
+              hideScans={!showScans}
               onAnnotate={(type, color) => annotate(type, color)}
               onComment={() => void actionRef.current('annot:comment')}
               onRemoveAnnotation={doRemove}
