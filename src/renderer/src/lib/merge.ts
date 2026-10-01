@@ -34,6 +34,18 @@ import { newId } from './annotations'
 
 export type MergeMode = 'sections' | 'concat'
 
+/**
+ * The first line of every merged document. An HTML comment, so it never shows.
+ *
+ * It lets a merged document be merged again without its sections being folded
+ * under the first one. Treated as an ordinary document, "# Alpha … # Beta"
+ * looks like a title (Alpha) with a competing heading (Beta), and Beta was
+ * moved beneath Alpha; every further merge nested earlier files one level
+ * deeper. Found by merging twice in a row. Being in the text, the marker
+ * survives saving and reopening, so "merge now, add more next week" works too.
+ */
+export const MERGED_MARK = '<!-- suprasuta:merged -->'
+
 export interface MergePart {
   /** File name, used as the section title when the document has none. */
   name: string
@@ -142,9 +154,12 @@ export function mergeDocuments(parts: MergePart[], mode: MergeMode): string {
 
   const bodies = parts.map((part, i) => {
     let text = part.markdown.replace(/\r\n?/g, '\n').trim()
+    const alreadyMerged = text.startsWith(MERGED_MARK)
+    if (alreadyMerged) text = text.slice(MERGED_MARK.length).trim()
     text = uniqueAnnotationIds(text, ids)
     text = uniqueFootnotes(text, footnotes, i)
-    if (mode === 'concat') return text
+    // A previous merge is already a run of sections: keep them as they are.
+    if (mode === 'concat' || alreadyMerged) return text
     // Headings move down only as far as needed for the highest of them to sit
     // directly under the section title, at level two. Moving every heading by
     // one regardless left a gap (title, then straight to level three) in any
@@ -166,5 +181,5 @@ export function mergeDocuments(parts: MergePart[], mode: MergeMode): string {
   // A blank line on both sides of the rule keeps `---` from being read as a
   // setext underline for the line above it.
   const joiner = mode === 'concat' ? '\n\n---\n\n' : '\n\n'
-  return bodies.filter((b) => b.length > 0).join(joiner) + '\n'
+  return `${MERGED_MARK}\n\n${bodies.filter((b) => b.length > 0).join(joiner)}\n`
 }

@@ -42,7 +42,13 @@ interface Props {
   current: { name: string; markdown: string } | null
   pickFiles: () => Promise<MergeSource[]>
   onClose: () => void
-  onMerged: (markdown: string, title: string) => void
+  /**
+   * `includedOpen` says whether the open document went into the result. When it
+   * did, nothing of it is lost by replacing it, so the caller can skip the
+   * save-first question and leave saving to the end: merge, merge again, save
+   * once.
+   */
+  onMerged: (markdown: string, title: string, includedOpen: boolean) => void
 }
 
 /** Text that needs no converting: read it as it is, so "unchanged" means unchanged. */
@@ -119,10 +125,16 @@ export default function MergeDialog(props: Props): JSX.Element {
     }
 
     const merged = mergeDocuments(parts, mode)
-    const first = parts[0].name.replace(/\.[^.]+$/, '')
+    // "report + 3 more (merged)". When the first item is itself a merge, its
+    // count carries on rather than the name growing "(merged) + 1 more
+    // (merged)" with every round.
+    const firstName = parts[0].name.replace(/\.[^.]+$/, '')
+    const earlier = /^(.*) \+ (\d+) more \(merged\)$/.exec(firstName)
+    const first = earlier ? earlier[1] : firstName
+    const more = (earlier ? Number(earlier[2]) : 0) + parts.length - 1
     setBusy(false)
     setProgress('')
-    props.onMerged(merged, `${first} + ${parts.length - 1} more (merged)`)
+    props.onMerged(merged, `${first} + ${more} more (merged)`, working.some((w) => !w.source))
   }
 
   const failed = items.find((i) => i.status === 'error')

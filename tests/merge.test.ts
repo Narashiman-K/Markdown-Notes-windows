@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mergeDocuments, demoteHeadings } from '../src/renderer/src/lib/merge'
+import { mergeDocuments, demoteHeadings, MERGED_MARK } from '../src/renderer/src/lib/merge'
 
 describe('mergeDocuments — each file a section', () => {
   it('keeps a document that already has its own title, and titles one that has none', () => {
@@ -26,12 +26,12 @@ describe('mergeDocuments — each file a section', () => {
       [{ name: 'Quarterly review.docx', markdown: '# Quarterly Review\n\n# Revenue\n\nUp.\n\n## Detail\n\n# Risks' }],
       'sections'
     )
-    expect(out).toBe('# Quarterly Review\n\n## Revenue\n\nUp.\n\n### Detail\n\n## Risks\n')
+    expect(out).toBe(`${MERGED_MARK}\n\n# Quarterly Review\n\n## Revenue\n\nUp.\n\n### Detail\n\n## Risks\n`)
   })
 
   it('titles a document that starts with something other than a heading', () => {
     const out = mergeDocuments([{ name: 'two.md', markdown: 'Intro.\n\n# One\n\n# Two' }], 'sections')
-    expect(out).toBe('# two\n\nIntro.\n\n## One\n\n## Two\n')
+    expect(out).toBe(`${MERGED_MARK}\n\n# two\n\nIntro.\n\n## One\n\n## Two\n`)
   })
 
   it('never touches # lines inside code blocks', () => {
@@ -53,7 +53,7 @@ describe('mergeDocuments — joined unchanged', () => {
     const a = '# A\n\n## Part\n\nalpha'
     const b = 'Plain text\nsecond line'
     expect(mergeDocuments([{ name: 'a.md', markdown: a }, { name: 'b.md', markdown: b }], 'concat')).toBe(
-      `${a}\n\n---\n\n${b}\n`
+      `${MERGED_MARK}\n\n${a}\n\n---\n\n${b}\n`
     )
   })
 })
@@ -74,5 +74,26 @@ describe('mergeDocuments — identifiers that must stay unique', () => {
     const out = mergeDocuments([{ name: 'a.md', markdown: doc('A') }, { name: 'b.md', markdown: doc('B') }], 'concat')
     expect(out).toContain('Claim[^1].\n\n[^1]: Source A.')
     expect(out).toContain('Claim[^1-2].\n\n[^1-2]: Source B.')
+  })
+})
+
+describe('mergeDocuments — merging a merged document again', () => {
+  it('keeps every earlier section at the top level, and writes the marker once', () => {
+    const first = mergeDocuments(
+      [
+        { name: 'a.md', markdown: '# Alpha\n\nfirst' },
+        { name: 'b.md', markdown: '# Beta\n\nsecond' }
+      ],
+      'sections'
+    )
+    const second = mergeDocuments([{ name: 'merged.md', markdown: first }, { name: 'c.md', markdown: '# Gamma\n\nthird' }], 'sections')
+    expect(second.match(/^# .*/gm)).toEqual(['# Alpha', '# Beta', '# Gamma'])
+    expect(second.split(MERGED_MARK)).toHaveLength(2)
+  })
+
+  it('still recognises a merged document after it has been saved with Windows line endings', () => {
+    const saved = mergeDocuments([{ name: 'a.md', markdown: '# Alpha' }, { name: 'b.md', markdown: '# Beta' }], 'sections').replace(/\n/g, '\r\n')
+    const again = mergeDocuments([{ name: 'saved.md', markdown: saved }, { name: 'c.md', markdown: '# Gamma' }], 'sections')
+    expect(again.match(/^# .*/gm)).toEqual(['# Alpha', '# Beta', '# Gamma'])
   })
 })

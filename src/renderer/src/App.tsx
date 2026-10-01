@@ -1156,10 +1156,14 @@ export default function App(): React.JSX.Element {
             )
           }}
           onClose={() => setMergeOpen(false)}
-          onMerged={async (markdown, title) => {
-            // The merged result replaces the open document, so unsaved work
-            // gets the usual save-or-discard question first.
-            if (!(await guardUnsaved())) return
+          onMerged={async (markdown, title, includedOpen) => {
+            // The result replaces the open document. When that document went
+            // into the merge, its text, unsaved edits included, lives on in
+            // the result, so there is nothing to ask: merge, merge again, and
+            // save once at the end (or be asked on closing). Only a document
+            // left out of the merge would be lost, so only then is saving
+            // offered first.
+            if (!includedOpen && !(await guardUnsaved())) return
             setMergeOpen(false)
             loadDocument(null, markdown)
             setFileName(title)
