@@ -3,9 +3,10 @@
  * executes for real users. It drives the real renderer through the real
  * preload/IPC bridge and writes screenshots + a JSON result to `out/smoke/`.
  */
-import { app, type BrowserWindow } from 'electron'
+import { app, net, type BrowserWindow } from 'electron'
 import { promises as fsp, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -300,9 +301,34 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
     win.webContents.send('menu:action', { action: 'ai:toggle' })
     await wait(400)
 
+    const samples = join(app.getAppPath(), 'samples')
+
+    /*
+     * 12z — the mn-local: image scheme serves images and nothing else.
+     *
+     * Fetched from the main process, which reaches the same handler the
+     * window's <img> tags do, and lets the status codes be checked exactly:
+     * a document chooses the paths it asks for, so the refusals matter as
+     * much as the success.
+     */
+    mark('mn-local image scheme')
+    const viaScheme = async (fileUrl: string): Promise<number> => {
+      try {
+        const r = await net.fetch(`mn-local://image/?src=${encodeURIComponent(fileUrl)}`)
+        return r.status
+      } catch {
+        return -1
+      }
+    }
+    const imageStatus = await viaScheme(pathToFileURL(join(samples, 'sample.bmp')).toString())
+    check('mn-local serves a local image', imageStatus === 200, `status ${imageStatus}`)
+    const textStatus = await viaScheme(pathToFileURL(join(samples, 'sample.txt')).toString())
+    check('mn-local refuses a non-image file', textStatus === 403, `status ${textStatus}`)
+    const remoteStatus = await viaScheme('https://example.com/a.png')
+    check('mn-local refuses anything that is not file:', remoteStatus === 400, `status ${remoteStatus}`)
+
     /* 13a — convert every supported format from a real file */
     mark('starting conversions')
-    const samples = join(app.getAppPath(), 'samples')
     const conversions: Array<{ file: string; expect: RegExp[] }> = [
       { file: 'sample.docx', expect: [/# Quarterly Review|## Revenue/, /fourteen percent/, /\| Region \| Owner \| Status \|/] },
       { file: 'sample.xlsx', expect: [/\| Item \| Qty \| Price \|/, /\| Widget \| 10 \| 2\.5 \|/, /## Q2/] },

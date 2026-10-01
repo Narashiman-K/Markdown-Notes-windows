@@ -60,7 +60,7 @@ export default function LivePreview({
   const bodyRef = useRef<HTMLElement>(null)
   const [bar, setBar] = useState<{ x: number; y: number; flip: boolean } | null>(null)
 
-  const html = useMemo(() => renderMarkdown(source, { sourceLines: true }), [source])
+  const html = useMemo(() => renderMarkdown(source, { sourceLines: true, screen: true }), [source])
 
   // Announce the elements once they exist, and withdraw them on unmount so no
   // listener is left attached to a node that is no longer on the page.

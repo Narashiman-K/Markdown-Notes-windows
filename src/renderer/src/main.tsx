@@ -4,6 +4,12 @@ import App from './App'
 import './styles/app.css'
 import './styles/markdown.css'
 import 'highlight.js/styles/github.css'
+import { setLocalImageResolver } from './lib/markdown'
+
+// Local images are loaded through the main process's `mn-local:` scheme on
+// screen. See setLocalImageResolver in lib/markdown.ts for why, and
+// registerLocalImageProtocol in the main process for what it will serve.
+setLocalImageResolver((fileUrl) => `mn-local://image/?src=${encodeURIComponent(fileUrl)}`)
 
 // Expose the converters to the smoke harness so it can run real files through
 // the real code path. Gated on an environment variable set only by the test

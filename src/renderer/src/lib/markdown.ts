@@ -176,10 +176,42 @@ const PURIFY_CONFIG = {
   ALLOWED_URI_REGEXP: URI_ALLOWED
 }
 
-export function renderMarkdown(source: string, options?: { sourceLines?: boolean }): string {
+/*
+ * How a local image is loaded when the document is shown on screen.
+ *
+ * A `file:` image can only load into a page that is itself on `file:`.
+ * Chromium refuses it from an `http:` page whatever the CSP says, and the
+ * desktop app's development build serves its window from Vite over http. So
+ * Insert > Image showed a broken picture in the viewer while print preview,
+ * rendered from a temporary file, showed it correctly. The installed app only
+ * worked because it happens to load from `file:` — a privilege the planned
+ * Electron hardening removes.
+ *
+ * The desktop build therefore registers a resolver that rewrites such sources
+ * to its own `mn-local:` scheme, served by the main process and limited to
+ * image files. It applies only to on-screen rendering (`screen: true`):
+ * exported and printed HTML keep the real `file:` path, which is correct for
+ * a file opened from disk. The web build registers nothing, so there it is a
+ * no-op.
+ */
+let localImageResolver: ((fileUrl: string) => string) | null = null
+
+export function setLocalImageResolver(resolver: ((fileUrl: string) => string) | null): void {
+  localImageResolver = resolver
+}
+
+export function renderMarkdown(source: string, options?: { sourceLines?: boolean; screen?: boolean }): string {
   const html = md.render(source, { sourceLines: options?.sourceLines === true })
   installFileLinkHook()
-  return DOMPurify.sanitize(html, PURIFY_CONFIG) as unknown as string
+  const clean = DOMPurify.sanitize(html, PURIFY_CONFIG) as unknown as string
+  const resolve = options?.screen ? localImageResolver : null
+  if (!resolve) return clean
+  // DOMPurify serialises every attribute double-quoted, so this pattern sees
+  // all of them. The replacement is URL-encoded by the resolver, so it can
+  // never close the attribute early.
+  return clean.replace(/(<img\b[^>]*?\ssrc=")(file:[^"]*)(")/gi, (_m, head: string, url: string, tail: string) =>
+    `${head}${resolve(url.replace(/&amp;/g, '&'))}${tail}`
+  )
 }
 
 export function extractHeadings(source: string): Heading[] {

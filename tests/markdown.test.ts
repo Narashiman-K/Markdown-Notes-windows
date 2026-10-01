@@ -25,7 +25,8 @@ const dom = new JSDOM('')
 
 // The only line that differs from the web app's copy of this test: the
 // renderer lives a couple of directories deeper here.
-const { renderMarkdown } = await import('../src/renderer/src/lib/markdown')
+const markdownModule = await import('../src/renderer/src/lib/markdown')
+const { renderMarkdown } = markdownModule
 
 const SOURCE = `# Title
 
@@ -118,5 +119,60 @@ describe('renderMarkdown link safety', () => {
     expect(html).not.toMatch(/<script/i)
     expect(html).not.toMatch(/onerror/i)
     expect(html).not.toMatch(/javascript:/i)
+  })
+})
+
+/*
+ * On-screen local images.
+ *
+ * The desktop build rewrites `file:` image sources to its own scheme for the
+ * window, because a `file:` image cannot load into its development page.
+ * Exports and printing must keep the real path, and nothing but images may be
+ * touched.
+ */
+describe('renderMarkdown local images on screen', () => {
+  const { setLocalImageResolver } = markdownModule
+  const SRC = '![p](file:///C:/Users/me/a%20b.png) and [doc](file:///C:/x.pdf)'
+
+  it('leaves file: images alone when no resolver is set (the web build)', () => {
+    setLocalImageResolver(null)
+    expect(renderMarkdown(SRC, { screen: true })).toContain('src="file:///C:/Users/me/a%20b.png"')
+  })
+
+  it('rewrites only on screen, and only images', () => {
+    setLocalImageResolver((u) => `mn-local://image/?src=${encodeURIComponent(u)}`)
+    try {
+      const screen = renderMarkdown(SRC, { screen: true })
+      expect(screen).toContain(`src="mn-local://image/?src=${encodeURIComponent('file:///C:/Users/me/a%20b.png')}"`)
+      expect(screen).not.toMatch(/href="mn-local:/)
+
+      const exported = renderMarkdown(SRC)
+      expect(exported).toContain('src="file:///C:/Users/me/a%20b.png"')
+      expect(exported).not.toContain('mn-local:')
+    } finally {
+      setLocalImageResolver(null)
+    }
+  })
+
+  it('cannot be used to break out of the src attribute', () => {
+    // Asserted on the parsed DOM, not the string. The first payload is never
+    // an image at all — markdown-it leaves it as text with the quotes escaped
+    // — so a plain /onerror/ match fails on harmless text, which is how this
+    // test was first written and why it read as a failure.
+    setLocalImageResolver((u) => `mn-local://image/?src=${encodeURIComponent(u)}`)
+    try {
+      for (const payload of [
+        '![x](file:///C:/a.png" onerror="alert(1))',
+        '![x](<file:///C:/a.png" onerror="alert(1)>)'
+      ]) {
+        const doc = new dom.window.DOMParser().parseFromString(renderMarkdown(payload, { screen: true }), 'text/html')
+        expect(doc.querySelector('[onerror]'), payload).toBeNull()
+        for (const img of doc.querySelectorAll('img')) {
+          expect(img.getAttribute('src') ?? '', payload).toMatch(/^mn-local:\/\/image\/\?src=[^\s"]*$/)
+        }
+      }
+    } finally {
+      setLocalImageResolver(null)
+    }
   })
 })

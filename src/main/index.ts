@@ -1,7 +1,7 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, nativeTheme, type IpcMainInvokeEvent } from 'electron'
-import { join, basename, dirname } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { promises as fsp, watch as fsWatch, existsSync, type FSWatcher } from 'node:fs'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeTheme, protocol, net, type IpcMainInvokeEvent } from 'electron'
+import { join, basename, dirname, extname } from 'node:path'
+import { pathToFileURL, fileURLToPath } from 'node:url'
+import { promises as fsp, watch as fsWatch, existsSync, rmSync, type FSWatcher } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { buildMenu } from './menu'
 import { getSettings, setSettings, addRecent, clearRecent } from './store'
@@ -24,6 +24,51 @@ const MD_FILTERS = [
 ]
 
 const READABLE_EXTS = TEXT_EXTS
+
+/*
+ * `mn-local:` — how the window shows images that live on this computer.
+ *
+ * The renderer rewrites an on-screen `<img src="file:///…">` to
+ * `mn-local://image/?src=<the file URL>` (see setLocalImageResolver in
+ * lib/markdown.ts). A `file:` image cannot load into the development build's
+ * http page at all, and in the installed app it only loads because the page
+ * happens to be on `file:` too — a privilege the planned Electron hardening
+ * takes away. A scheme of the app's own works the same way in both.
+ *
+ * It has to be declared privileged before the app is ready, which is why this
+ * runs at module load rather than inside whenReady.
+ */
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'mn-local', privileges: { standard: true, secure: true, stream: true } }
+])
+
+/**
+ * What `mn-local:` will hand back: images, and nothing else.
+ *
+ * A document can come from anywhere, and it chooses which paths it asks for,
+ * so the scheme is not a general file server. Anything that is not an image by
+ * extension is refused before the disk is touched. The renderer's CSP allows
+ * the scheme in `img-src` only, so even an image cannot be fetched and read
+ * by script — it can only be drawn.
+ */
+const LOCAL_IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico'])
+
+function registerLocalImageProtocol(): void {
+  protocol.handle('mn-local', async (request) => {
+    try {
+      const src = new URL(request.url).searchParams.get('src') ?? ''
+      const target = new URL(src)
+      if (target.protocol !== 'file:') return new Response('Only local files are served.', { status: 400 })
+      const path = fileURLToPath(target)
+      if (!LOCAL_IMAGE_EXTS.has(extname(path).slice(1).toLowerCase())) {
+        return new Response('Only images are served.', { status: 403 })
+      }
+      return await net.fetch(pathToFileURL(path).toString())
+    } catch {
+      return new Response('Not found.', { status: 404 })
+    }
+  })
+}
 
 /** Locates the app icon in both the development tree and a packaged build. */
 function appIconPath(): string | undefined {
@@ -719,6 +764,25 @@ function fileFromArgv(argv: string[]): string | null {
   return candidates[0] ?? null
 }
 
+/*
+ * The smoke and screenshot harnesses get a throwaway profile of their own.
+ *
+ * Before this they ran against the user's real one, which had two effects.
+ * They wrote into it — recent files, the chosen AI provider — so the smoke
+ * test had to carry steps that put settings back afterwards. And the
+ * single-instance lock below is taken on the profile folder, so a test run
+ * could not start at all while the app was open for real use.
+ *
+ * Set before the lock is requested, because the lock is keyed on this path.
+ * Cleared each run so every run starts from the same empty state.
+ */
+const harness = process.env['MARKNOTE_SMOKE'] === '1' || process.env['MARKNOTE_SHOTS'] === '1'
+if (harness) {
+  const profile = join(tmpdir(), `${APP_ASCII_NAME} (test run)`)
+  rmSync(profile, { recursive: true, force: true })
+  app.setPath('userData', profile)
+}
+
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
@@ -743,7 +807,8 @@ if (!gotLock) {
     app.setName(APP_DISPLAY_NAME)
     // The display name contains a superscript ²; keep the settings folder ASCII
     // so no tool trips over a Unicode path.
-    app.setPath('userData', join(app.getPath('appData'), APP_ASCII_NAME))
+    if (!harness) app.setPath('userData', join(app.getPath('appData'), APP_ASCII_NAME))
+    registerLocalImageProtocol()
     registerIpc()
     pendingOpenPath = fileFromArgv(process.argv)
     createWindow()

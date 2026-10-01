@@ -46,7 +46,7 @@ const Preview = forwardRef<PreviewHandle, Props>(function Preview(props, ref) {
   const [toolbar, setToolbar] = useState<ToolbarState>({ x: 0, y: 0, visible: false, flip: false })
   const [hoverNote, setHoverNote] = useState<{ x: number; y: number; text: string; id: string } | null>(null)
 
-  const html = useMemo(() => renderMarkdown(source), [source])
+  const html = useMemo(() => renderMarkdown(source, { screen: true }), [source])
 
   // Re-index the rendered DOM whenever the document changes.
   useEffect(() => {
