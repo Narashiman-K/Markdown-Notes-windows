@@ -6,9 +6,10 @@
  *   cloud   — Google Gemini via an injected callback. Better accuracy, and it
  *             can describe charts and diagrams, not just transcribe text.
  *             Needs the user's own API key; the image is sent to Google.
- *   offline — Tesseract.js, bundled. No key, no network, nothing leaves the
- *             machine. Good on clean printed text, weak on anything else, and
- *             it cannot describe visual structure at all.
+ *   offline — Tesseract.js, with its engine and language model served from the
+ *             app itself. No key, no network, nothing leaves the machine. Good
+ *             on clean printed text, weak on anything else, and it cannot
+ *             describe visual structure at all.
  *
  * Tesseract is imported lazily so its several megabytes of WASM only load if
  * the user actually chooses offline OCR.
@@ -48,24 +49,110 @@ async function toPngIfNeeded(bytes: Uint8Array, fileName: string): Promise<Blob>
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b ?? blob), 'image/png'))
 }
 
+/**
+ * Points tesseract.js at the copies of its worker, engine and language model
+ * that `scripts/tesseract-assets.mjs` stages into the build.
+ *
+ * Left to its own devices, tesseract.js fetches all three from jsdelivr on
+ * first use. That makes "offline" OCR fail with no signal — the exact case it
+ * exists for — and puts a third party in the request path. These paths are
+ * relative to the app's own origin, and on Android they resolve inside the APK.
+ */
+function localPaths(): { workerPath: string; corePath: string; langPath: string; workerBlobURL: boolean } {
+  const base = new URL('tesseract/', document.baseURI).href
+  return {
+    workerPath: `${base}worker.min.js`,
+    // A directory: tesseract.js appends the core filename itself after probing
+    // for SIMD support, so both variants must be present.
+    corePath: base,
+    langPath: base,
+    /*
+     * Start the worker straight from its URL rather than from a blob: wrapper.
+     * The wrapper exists so a worker can be started from a cross-origin CDN
+     * script, which these local paths never need. Under the Windows app's
+     * Content-Security-Policy it was fatal: a blob: worker is refused, so
+     * offline OCR there failed at "Failed to construct 'Worker'" on every
+     * image. Loading from the app's own origin needs no policy exception.
+     */
+    workerBlobURL: false
+  }
+}
+
+/** One loaded Tesseract engine, reusable across many images. */
+export interface OfflineReader {
+  /** Reads one image. `onFraction` receives 0–1 progress for this image alone. */
+  read(image: Blob, onFraction?: (fraction: number) => void): Promise<{ text: string; confidence: number }>
+  close(): Promise<void>
+}
+
+/**
+ * Loads the offline engine once, for one image or for every page of a scanned
+ * PDF. Starting Tesseract — worker, WASM core, language model — costs a second
+ * or more, so a forty-page scan must not pay it forty times.
+ */
+export async function openOfflineReader(onProgress?: ConvertOptions['onProgress']): Promise<OfflineReader> {
+  onProgress?.('Loading the offline OCR engine…', 0.05)
+  const { createWorker } = await import('tesseract.js')
+
+  let report: (fraction: number) => void = () => {}
+  const logger = (m: { status?: string; progress?: number }): void => {
+    if (m.status === 'recognizing text') report(m.progress ?? 0)
+  }
+
+  // Falls back to the library's own defaults if the bundled copies cannot be
+  // loaded — a stale service worker cache, say, or a device that rejects the
+  // WASM build. Degrading to a CDN fetch is better than refusing to work, and
+  // the image still never leaves the device either way. (The Windows app's CSP
+  // refuses that CDN, so there the fallback fails too, and the original error
+  // is the one that matters.)
+  let worker: Awaited<ReturnType<typeof createWorker>>
+  try {
+    worker = await createWorker('eng', 1, { ...localPaths(), logger })
+  } catch (localErr) {
+    console.warn('Bundled Tesseract engine unavailable, falling back to the CDN.', localErr)
+    try {
+      worker = await createWorker('eng', 1, { logger })
+    } catch (cdnErr) {
+      // Report both. The fallback's error alone is misleading: it describes
+      // why the CDN copy failed, when the real question is why the bundled
+      // one did — that was hidden this way once already.
+      const why = (e: unknown): string => String((e as Error)?.message ?? e)
+      throw new Error(
+        `The offline OCR engine could not start (${why(localErr)}), and the online fallback failed too (${why(cdnErr)}).`
+      )
+    }
+  }
+
+  return {
+    async read(image, onFraction) {
+      report = onFraction ?? (() => {})
+      try {
+        const { data } = await worker.recognize(image)
+        return {
+          text: (data.text ?? '').replace(/\n{3,}/g, '\n\n').trim(),
+          confidence: Math.round(data.confidence ?? 0)
+        }
+      } finally {
+        report = () => {}
+      }
+    },
+    async close() {
+      await worker.terminate()
+    }
+  }
+}
+
 async function offlineOcr(
   bytes: Uint8Array,
   fileName: string,
   onProgress?: ConvertOptions['onProgress']
 ): Promise<ConvertResult> {
-  onProgress?.('Loading the offline OCR engine…', 0.1)
-  const { createWorker } = await import('tesseract.js')
-
-  const worker = await createWorker('eng', 1, {
-    logger: (m: { status?: string; progress?: number }) => {
-      if (m.status === 'recognizing text') onProgress?.('Reading text from the image…', 0.3 + (m.progress ?? 0) * 0.7)
-    }
-  })
-
+  const reader = await openOfflineReader(onProgress)
   try {
     const image = await toPngIfNeeded(bytes, fileName)
-    const { data } = await worker.recognize(image)
-    const text = (data.text ?? '').replace(/\n{3,}/g, '\n\n').trim()
+    const { text, confidence } = await reader.read(image, (f) =>
+      onProgress?.('Reading text from the image…', 0.3 + f * 0.7)
+    )
 
     if (!text) {
       return {
@@ -76,7 +163,6 @@ async function offlineOcr(
       }
     }
 
-    const confidence = Math.round(data.confidence ?? 0)
     const warning =
       confidence < 70
         ? '\n\n> **Note:** offline OCR reported low confidence on this image. Cloud OCR would likely read it more accurately.'
@@ -88,7 +174,7 @@ async function offlineOcr(
       meta: { engine: 'tesseract', confidence }
     }
   } finally {
-    await worker.terminate()
+    await reader.close()
   }
 }
 

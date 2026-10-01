@@ -17,6 +17,9 @@ samples/*.odt
 samples/*.epub
 samples/*.wav
 
+# Staged from node_modules by scripts/tesseract-assets.mjs on every build.
+src/renderer/public/tesseract/
+
 # Personal documents used while testing - never publish these
 Converted-Files/
 backup_*/
