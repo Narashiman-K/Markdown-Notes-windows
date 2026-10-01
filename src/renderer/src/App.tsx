@@ -8,6 +8,7 @@ import NoteDialog from './components/NoteDialog'
 import AboutDialog from './components/AboutDialog'
 import ConvertDialog from './components/ConvertDialog'
 import MergeDialog from './components/MergeDialog'
+import { normaliseOcrLanguages } from './lib/ocrLanguages'
 import AiPanel from './components/AiPanel'
 import DiffDialog from './components/DiffDialog'
 import { installSignature, signatureComment } from './lib/signature'
@@ -100,6 +101,14 @@ export default function App(): React.JSX.Element {
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY)
   const [reviewChanges, setReviewChanges] = useState(true)
   const [blockTints, setBlockTints] = useState<BlockKind[]>(() => [...DEFAULT_BLOCK_TINTS])
+  // Languages offline OCR reads. Remembered: a user with Kannada scans should
+  // not have to tick Kannada every time.
+  const [ocrLanguages, setOcrLanguages] = useState<string[]>(['eng'])
+  const changeOcrLanguages = useCallback((codes: string[]) => {
+    const clean = normaliseOcrLanguages(codes)
+    setOcrLanguages(clean)
+    void window.api.setSettings({ ocrLanguages: clean })
+  }, [])
   const [recentFiles, setRecentFiles] = useState<string[]>([])
   const [readerOn, setReaderOn] = useState(false)
   const [reader, setReader] = useState<ReaderSettings>(DEFAULT_READER)
@@ -870,6 +879,7 @@ export default function App(): React.JSX.Element {
       // as an empty array — that is a deliberate "tint nothing".
       if (Array.isArray(s?.recentFiles)) setRecentFiles(s.recentFiles as string[])
       if (Array.isArray(s?.blockTints)) setBlockTints(s.blockTints as BlockKind[])
+      setOcrLanguages(normaliseOcrLanguages(s?.ocrLanguages))
       if (s?.reader) setReader({ ...DEFAULT_READER, ...(s.reader as Partial<ReaderSettings>) })
     })
 
@@ -1140,6 +1150,7 @@ export default function App(): React.JSX.Element {
 
       {mergeOpen && (
         <MergeDialog
+          ocrLanguages={ocrLanguages}
           current={content.trim() ? { name: fileName, markdown: content } : null}
           pickFiles={async () => {
             const r = await window.api.convertPickInput()
@@ -1175,6 +1186,8 @@ export default function App(): React.JSX.Element {
 
       {convertSeed !== null && (
         <ConvertDialog
+          ocrLanguages={ocrLanguages}
+          onOcrLanguagesChange={changeOcrLanguages}
           initialFiles={convertSeed}
           onClose={() => setConvertSeed(null)}
           onToast={flash}

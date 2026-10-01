@@ -1344,3 +1344,8 @@ html[data-reader] .markdown-body img { max-width: 100%; }
 
 /* A toolbar button with a word on it, not just an icon (Merge docs). */
 .tb.tb-text { font-size: 13px; padding-left: 10px; padding-right: 10px; white-space: nowrap; }
+
+/* Text-language choice for offline OCR, in Convert to Markdown. */
+.ocr-langs { margin: 6px 0 2px 26px; }
+.ocr-lang-list { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 4px 0; }
+.ocr-lang { margin: 0; }

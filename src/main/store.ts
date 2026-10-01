@@ -34,6 +34,11 @@ export interface Settings {
    * main process and must not import from the renderer.
    */
   reader: { width: string; size: string; spacing: string; palette: string }
+  /**
+   * Languages offline OCR reads, as Tesseract codes ('eng', 'kan', 'hin').
+   * Loosely typed for the same reason; the renderer cleans it on load.
+   */
+  ocrLanguages: string[]
 }
 
 const DEFAULTS: Settings = {
@@ -49,7 +54,8 @@ const DEFAULTS: Settings = {
   aiModel: '',
   aiReviewChanges: true,
   blockTints: ['codeBlock', 'blockquote'],
-  reader: { width: 'medium', size: 'normal', spacing: 'normal', palette: 'auto' }
+  reader: { width: 'medium', size: 'normal', spacing: 'normal', palette: 'auto' },
+  ocrLanguages: ['eng']
 }
 
 let cache: Settings | null = null

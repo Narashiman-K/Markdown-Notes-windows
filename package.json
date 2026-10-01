@@ -36,6 +36,8 @@
     "@codemirror/view": "^6.35.3",
     "@lezer/highlight": "^1.2.1",
     "@tesseract.js-data/eng": "^1.0.0",
+    "@tesseract.js-data/hin": "^1.0.0",
+    "@tesseract.js-data/kan": "^1.0.0",
     "@types/jsdom": "^30.0.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.10.2",

@@ -379,17 +379,19 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
      * a CSP that refuses the CDN the engine falls back to. ocr-sample.png is
      * the MCP package's known-good OCR fixture; sample-scanned.pdf is the
      * same image as two pages with no text layer — what a flatbed scanner
-     * produces.
+     * produces. ocr-kannada.png checks the bundled Kannada model is staged and
+     * loads: read as English, the same image came out as Latin nonsense.
      */
-    const ocrCases: Array<{ file: string; expect: RegExp[]; ms: number }> = [
+    const ocrCases: Array<{ file: string; expect: RegExp[]; ms: number; langs?: string[] }> = [
       { file: 'ocr-sample.png', expect: [/Quarterly Operations Report/i, /fourteen percent/i], ms: 120_000 },
       {
         file: 'sample-scanned.pdf',
         expect: [/Quarterly Operations Report/i, /## Page 1/, /## Page 2/, /fourteen percent/i],
         ms: 240_000
-      }
+      },
+      { file: 'ocr-kannada.png', expect: [/ಕನ್ನಡ/, /ಬೆಂಗಳೂರು/, /ರಾಜಧಾನಿ/], ms: 120_000, langs: ['kan'] }
     ]
-    for (const { file, expect, ms } of ocrCases) {
+    for (const { file, expect, ms, langs } of ocrCases) {
       mark(`offline OCR ${file}`)
       const path = join(samples, file).replace(/\\/g, '\\\\')
       const raw = await jsWithTimeout<string>(
@@ -397,7 +399,7 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
         try {
           const read = await window.api.readBytes("${path}");
           if (!read.ok) return JSON.stringify({ ok:false, error:read.error });
-          const r = await window.__convert.convertToMarkdown(new Uint8Array(read.bytes), "${file}", { ocrMode: 'offline' });
+          const r = await window.__convert.convertToMarkdown(new Uint8Array(read.bytes), "${file}", { ocrMode: 'offline', ocrLanguages: ${JSON.stringify(langs ?? ['eng'])} });
           return JSON.stringify({ ok:r.ok, code:r.code, error:r.error, markdown:(r.markdown||""), engine:(r.meta && r.meta.engine) || '' });
         } catch (e) { return JSON.stringify({ ok:false, error:String(e && e.message || e) }); }
       })()`,

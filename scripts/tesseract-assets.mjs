@@ -49,6 +49,15 @@ function packageDir(name) {
  */
 const CORES = ['tesseract-core-relaxedsimd-lstm.wasm.js', 'tesseract-core-simd-lstm.wasm.js']
 
+/**
+ * The language models built into the app: English, plus Kannada and Hindi
+ * (about 1.9 and 1.4 MB). Chosen by the owner for a Store audience that
+ * includes India; every other language is to come as a one-off download
+ * instead, which keeps the installer small. Must match BUILT_IN_OCR_LANGUAGES
+ * in src/lib/ocrLanguages.ts, which tests/ocrLanguages.test.ts checks.
+ */
+export const LANGUAGES = ['eng', 'kan', 'hin']
+
 async function main() {
   await mkdir(outDir, { recursive: true })
 
@@ -88,9 +97,11 @@ async function main() {
    * than the fast model on the scanned and photographed pages this app sees,
    * and 3 MB rather than 11 MB for the full-precision one.
    */
-  const langSrc = join(packageDir('@tesseract.js-data/eng'), '4.0.0_best_int', 'eng.traineddata.gz')
-  await copyFile(langSrc, join(outDir, 'eng.traineddata.gz'))
-  copied.push('eng.traineddata.gz')
+  for (const lang of LANGUAGES) {
+    const file = `${lang}.traineddata.gz`
+    await copyFile(join(packageDir(`@tesseract.js-data/${lang}`), '4.0.0_best_int', file), join(outDir, file))
+    copied.push(file)
+  }
 
   let total = 0
   for (const name of copied) total += (await stat(join(outDir, name))).size
@@ -99,7 +110,7 @@ async function main() {
   )
 }
 
-main().catch((err) => {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch((err) => {
   console.error(`\ntesseract asset staging failed: ${err.message}\n`)
   process.exit(1)
 })

@@ -20,6 +20,7 @@ import { useState } from 'react'
 import { convertToMarkdown, extensionOf, needsTranscription } from '../lib/convert'
 import { mergeDocuments, isMerged, type MergeMode } from '../lib/merge'
 import Loader from './Loader'
+import { describeOcrLanguages, normaliseOcrLanguages } from '../lib/ocrLanguages'
 
 /** A file the platform can hand over: its name, and its bytes on demand. */
 export interface MergeSource {
@@ -41,6 +42,8 @@ interface Props {
   /** The open document, offered as the first item when it has any text. */
   current: { name: string; markdown: string } | null
   pickFiles: () => Promise<MergeSource[]>
+  /** Languages for pictures and scanned pages, as chosen in Convert to Markdown. */
+  ocrLanguages?: readonly string[]
   onClose: () => void
   /**
    * `includedOpen` says whether the open document went into the result. When it
@@ -114,6 +117,7 @@ export default function MergeDialog(props: Props): JSX.Element {
           } else {
             const r = await convertToMarkdown(bytes, it.name, {
               ocrMode: 'offline',
+              ocrLanguages: props.ocrLanguages,
               onProgress: (m) => setProgress(`${it.name} (${i + 1} of ${working.length}): ${m}`)
             })
             if (!r.ok) throw new Error(r.error ?? 'Could not be converted.')
@@ -160,7 +164,9 @@ export default function MergeDialog(props: Props): JSX.Element {
         <h3>Merge files</h3>
         <p className="small muted">
           Combine documents into one, in the order below. Your files are not changed: the result opens as a new
-          document for you to save. Documents that are not Markdown are converted first, on this device.
+          document for you to save. Documents that are not Markdown are converted first, on this device; pictures
+          and scanned pages are read as {describeOcrLanguages(normaliseOcrLanguages(props.ocrLanguages))} (change
+          that under Text language in Convert to Markdown).
         </p>
 
         <div className="convert-list merge-list">

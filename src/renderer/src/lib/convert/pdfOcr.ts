@@ -22,6 +22,7 @@ import type { ConvertResult, ConvertOptions } from './types'
 import { titleFrom, tidy } from './normalise'
 import { openOfflineReader, unreadableWarning, UNREADABLE_CONFIDENCE, type OfflineReader } from './ocr'
 import { CloudCaller } from './cloudRetry'
+import { normaliseOcrLanguages } from '../ocrLanguages'
 
 /** Pixels across an A4 page at 300 dpi, the width pages are scaled towards. */
 const TARGET_WIDTH = 2480
@@ -89,7 +90,7 @@ export async function ocrScannedPdf(
   })
 
   const readOffline = async (n: number, image: Blob): Promise<{ text: string; confidence: number }> => {
-    reader ??= await openOfflineReader(onProgress)
+    reader ??= await openOfflineReader(onProgress, options.ocrLanguages)
     return reader.read(image, (f) => status(n, f, wantCloud ? ' (offline)' : ''))
   }
 
@@ -158,13 +159,14 @@ export async function ocrScannedPdf(
 
     return {
       ok: true,
-      markdown: (unreadable ? unreadableWarning(confidence!) : '') + tidy(parts) + note,
+      markdown: (unreadable ? unreadableWarning(confidence!, options.ocrLanguages) : '') + tidy(parts) + note,
       meta: {
         engine: allCloud ? 'gemini' : allOffline ? 'tesseract' : 'gemini+tesseract',
         pages,
         scanned: true,
         ...(offlinePages.length && wantCloud ? { offlinePages } : {}),
-        ...(confidence !== undefined ? { confidence } : {})
+        ...(confidence !== undefined ? { confidence } : {}),
+        ...(allCloud ? {} : { languages: normaliseOcrLanguages(options.ocrLanguages).join('+') })
       }
     }
   } finally {

@@ -17,6 +17,7 @@
 import type { ConvertResult, ConvertOptions } from './types'
 import { extensionOf } from './types'
 import { titleFrom, tidy } from './normalise'
+import { normaliseOcrLanguages, describeOcrLanguages, tidyOcrText } from '../ocrLanguages'
 
 const MIME: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -84,18 +85,19 @@ function localPaths(): { workerPath: string; corePath: string; langPath: string;
  * Measured, not chosen: clean English printed text reads at 95%, while Hindi
  * read with the English model came back at 33% and Kannada at 22%, both as
  * meaningless Latin letters. Real but blurry English scans land between 60 and
- * 75, and keep only the milder note. Until multilingual OCR exists, a result
- * under this line was almost always a different language or script.
+ * 75, and keep only the milder note. A result under this line has almost
+ * always been read with the wrong language: the pages are in a script the
+ * chosen models do not cover.
  */
 export const UNREADABLE_CONFIDENCE = 60
 
 /** Shown at the very top of a result that is very probably nonsense. */
-export function unreadableWarning(confidence: number): string {
+export function unreadableWarning(confidence: number, languages?: readonly string[]): string {
+  const read = describeOcrLanguages(normaliseOcrLanguages(languages))
   return (
-    `> **This result is probably not readable.** Offline OCR was only ${confidence}% confident. ` +
-    'It currently reads English only, so text in other languages, such as Kannada or Hindi, ' +
-    'comes out as meaningless letters. Convert this document again with **Cloud** OCR selected, ' +
-    'or wait for multilingual offline OCR.\n\n'
+    `> **This result is probably not readable.** Offline OCR was only ${confidence}% confident reading it as ${read}. ` +
+    'That usually means the pages are in another language or script. In Convert to Markdown, tick the ' +
+    "document's language under **Text language** and convert again, or choose **Cloud** OCR.\n\n"
   )
 }
 
@@ -111,8 +113,14 @@ export interface OfflineReader {
  * PDF. Starting Tesseract — worker, WASM core, language model — costs a second
  * or more, so a forty-page scan must not pay it forty times.
  */
-export async function openOfflineReader(onProgress?: ConvertOptions['onProgress']): Promise<OfflineReader> {
-  onProgress?.('Loading the offline OCR engine…', 0.05)
+export async function openOfflineReader(
+  onProgress?: ConvertOptions['onProgress'],
+  languages?: readonly string[]
+): Promise<OfflineReader> {
+  // Several languages load together as `kan+eng`; each one is another model
+  // to load and another to try on every line, so only the chosen ones load.
+  const langs = normaliseOcrLanguages(languages)
+  onProgress?.(`Loading the offline OCR engine (${describeOcrLanguages(langs)})…`, 0.05)
   const { createWorker } = await import('tesseract.js')
 
   let report: (fraction: number) => void = () => {}
@@ -128,11 +136,11 @@ export async function openOfflineReader(onProgress?: ConvertOptions['onProgress'
   // is the one that matters.)
   let worker: Awaited<ReturnType<typeof createWorker>>
   try {
-    worker = await createWorker('eng', 1, { ...localPaths(), logger })
+    worker = await createWorker(langs, 1, { ...localPaths(), logger })
   } catch (localErr) {
     console.warn('Bundled Tesseract engine unavailable, falling back to the CDN.', localErr)
     try {
-      worker = await createWorker('eng', 1, { logger })
+      worker = await createWorker(langs, 1, { logger })
     } catch (cdnErr) {
       // Report both. The fallback's error alone is misleading: it describes
       // why the CDN copy failed, when the real question is why the bundled
@@ -150,7 +158,7 @@ export async function openOfflineReader(onProgress?: ConvertOptions['onProgress'
       try {
         const { data } = await worker.recognize(image)
         return {
-          text: (data.text ?? '').replace(/\n{3,}/g, '\n\n').trim(),
+          text: tidyOcrText(data.text ?? '').replace(/\n{3,}/g, '\n\n').trim(),
           confidence: Math.round(data.confidence ?? 0)
         }
       } finally {
@@ -166,9 +174,10 @@ export async function openOfflineReader(onProgress?: ConvertOptions['onProgress'
 async function offlineOcr(
   bytes: Uint8Array,
   fileName: string,
-  onProgress?: ConvertOptions['onProgress']
+  onProgress?: ConvertOptions['onProgress'],
+  languages?: readonly string[]
 ): Promise<ConvertResult> {
-  const reader = await openOfflineReader(onProgress)
+  const reader = await openOfflineReader(onProgress, languages)
   try {
     const image = await toPngIfNeeded(bytes, fileName)
     const { text, confidence } = await reader.read(image, (f) =>
@@ -189,11 +198,11 @@ async function offlineOcr(
         ? '\n\n> **Note:** offline OCR reported low confidence on this image. Cloud OCR would likely read it more accurately.'
         : ''
 
-    const top = confidence < UNREADABLE_CONFIDENCE ? unreadableWarning(confidence) : ''
+    const top = confidence < UNREADABLE_CONFIDENCE ? unreadableWarning(confidence, languages) : ''
     return {
       ok: true,
       markdown: top + tidy([`# ${titleFrom(fileName)}`, text]) + (top ? '' : warning),
-      meta: { engine: 'tesseract', confidence }
+      meta: { engine: 'tesseract', confidence, languages: normaliseOcrLanguages(languages).join('+') }
     }
   } finally {
     await reader.close()
@@ -210,7 +219,7 @@ export async function convertImage(
   const mode = options.ocrMode ?? 'offline'
 
   if (mode === 'offline') {
-    return offlineOcr(bytes, fileName, options.onProgress)
+    return offlineOcr(bytes, fileName, options.onProgress, options.ocrLanguages)
   }
 
   if (!options.cloudOcr) {
