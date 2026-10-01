@@ -207,7 +207,21 @@ button.tb.accent { color: var(--accent); font-weight: 700; }
  * the user acting on the app, so nothing inside the document can be in front
  * of it.
  */
-.cm-panels {
+/*
+ * Why the selector is three classes deep.
+ *
+ * CodeMirror injects its own rule at runtime, `.ͼ1 .cm-panels { z-index: 300 }`.
+ * Two classes outrank one, so the plain `.cm-panels` that stood here lost to it
+ * every time, whatever number it held. The panel stayed at 300, above the
+ * menubar's 100, and covered every menu opened while find and replace was
+ * showing. Two earlier fixes changed the number, and neither had any effect.
+ * The inspector showed computed z-index 300 at once; the stylesheet alone
+ * never would have.
+ *
+ * Three classes beat CodeMirror's two regardless of which stylesheet loads
+ * last, and keep the panel in band 1, where document furniture belongs.
+ */
+.editor-host .cm-editor .cm-panels {
   z-index: 50;
 }
 
