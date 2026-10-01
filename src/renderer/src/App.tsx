@@ -25,6 +25,7 @@ import {
   type HistoryState
 } from './lib/history'
 import { extractHeadings, documentStats, renderMarkdown, standaloneHtml } from './lib/markdown'
+import { readPageSize } from './lib/pages'
 import {
   applyAnnotation,
   listAnnotations,
@@ -78,6 +79,18 @@ export default function App(): React.JSX.Element {
   const [content, setContent] = useState(WELCOME)
   const [filePath, setFilePath] = useState<string | null>(null)
   const [fileName, setFileName] = useState('Untitled')
+  /*
+   * Page view: the document on sheets of its original page size. On by itself
+   * for a document that recorded one (a converted PDF), until the user says
+   * otherwise; the choice lasts until another document is opened.
+   */
+  const [pageViewChoice, setPageViewChoice] = useState<boolean | null>(null)
+  const docHasPages = useMemo(() => readPageSize(content) !== null, [content])
+  const pageView = pageViewChoice ?? docHasPages
+  // The menu handler is a memoised callback; it reads this, not a stale copy.
+  const pageViewRef = useRef(pageView)
+  pageViewRef.current = pageView
+  useEffect(() => setPageViewChoice(null), [filePath, fileName])
   const [dirty, setDirty] = useState(false)
   const [mode, setMode] = useState<Mode>('view')
   const [zoom, setZoom] = useState(1)
@@ -104,6 +117,11 @@ export default function App(): React.JSX.Element {
   // Languages offline OCR reads. Remembered: a user with Kannada scans should
   // not have to tick Kannada every time.
   const [ocrLanguages, setOcrLanguages] = useState<string[]>(['eng'])
+  const [keepPageImages, setKeepPageImages] = useState(false)
+  const changeKeepPageImages = useCallback((keep: boolean) => {
+    setKeepPageImages(keep)
+    void window.api.setSettings({ keepPageImages: keep })
+  }, [])
   const changeOcrLanguages = useCallback((codes: string[]) => {
     const clean = normaliseOcrLanguages(codes)
     setOcrLanguages(clean)
@@ -398,7 +416,7 @@ export default function App(): React.JSX.Element {
     (forPrint: boolean) =>
       signatureComment() +
       '\n' +
-      standaloneHtml(fileName, renderMarkdown(content), `${markdownCss}\n${hljsCss}`, forPrint),
+      standaloneHtml(fileName, renderMarkdown(content), `${markdownCss}\n${hljsCss}`, forPrint, readPageSize(content)),
     [content, fileName]
   )
 
@@ -637,6 +655,9 @@ export default function App(): React.JSX.Element {
           return
         }
 
+        case 'view:pages':
+          setPageViewChoice(!pageViewRef.current)
+          break
         case 'view:reader':
           /*
            * Reading implies view mode. Entering it from the editor and
@@ -880,6 +901,7 @@ export default function App(): React.JSX.Element {
       if (Array.isArray(s?.recentFiles)) setRecentFiles(s.recentFiles as string[])
       if (Array.isArray(s?.blockTints)) setBlockTints(s.blockTints as BlockKind[])
       setOcrLanguages(normaliseOcrLanguages(s?.ocrLanguages))
+      setKeepPageImages(s?.keepPageImages === true)
       if (s?.reader) setReader({ ...DEFAULT_READER, ...(s.reader as Partial<ReaderSettings>) })
     })
 
@@ -1002,6 +1024,7 @@ export default function App(): React.JSX.Element {
         onAction={(a, payload) => void actionRef.current(a, payload)}
         recentFiles={recentFiles}
         theme={theme}
+        pageView={pageView}
       />
       <Toolbar
         mode={mode}
@@ -1049,6 +1072,7 @@ export default function App(): React.JSX.Element {
               zoom={zoom}
               activeAnnotation={activeId}
               readerMode={readerOn}
+              pageView={pageView}
               onAnnotate={(type, color) => annotate(type, color)}
               onComment={() => void actionRef.current('annot:comment')}
               onRemoveAnnotation={doRemove}
@@ -1151,6 +1175,7 @@ export default function App(): React.JSX.Element {
       {mergeOpen && (
         <MergeDialog
           ocrLanguages={ocrLanguages}
+          keepPageImages={keepPageImages}
           current={content.trim() ? { name: fileName, markdown: content } : null}
           pickFiles={async () => {
             const r = await window.api.convertPickInput()
@@ -1188,6 +1213,8 @@ export default function App(): React.JSX.Element {
         <ConvertDialog
           ocrLanguages={ocrLanguages}
           onOcrLanguagesChange={changeOcrLanguages}
+          keepPageImages={keepPageImages}
+          onKeepPageImagesChange={changeKeepPageImages}
           initialFiles={convertSeed}
           onClose={() => setConvertSeed(null)}
           onToast={flash}

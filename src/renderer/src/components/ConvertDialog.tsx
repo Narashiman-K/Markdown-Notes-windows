@@ -26,6 +26,9 @@ interface Props {
   /** Languages offline OCR reads; remembered by the app between sessions. */
   ocrLanguages: readonly string[]
   onOcrLanguagesChange: (codes: string[]) => void
+  /** Scanned PDFs: keep each page's picture beside its text. Remembered. */
+  keepPageImages: boolean
+  onKeepPageImagesChange: (keep: boolean) => void
 }
 
 const GEMINI_HELP = {
@@ -258,6 +261,7 @@ export default function ConvertDialog(props: Props): React.JSX.Element {
       const result = await convertToMarkdown(new Uint8Array(read.bytes), item.name, {
         ocrMode,
         ocrLanguages: props.ocrLanguages,
+        keepPageImages: props.keepPageImages,
         onProgress: (message) => setProgress(`${item.name}: ${message}`),
         cloudOcr: async (bytes, mimeType) => {
           const r = await window.api.cloudOcr({ bytes, mimeType })
@@ -419,6 +423,20 @@ export default function ConvertDialog(props: Props): React.JSX.Element {
                   <div className="small muted">Several languages at once read a little more slowly.</div>
                 )}
               </div>
+            )}
+
+            {hasPdfs && (
+              <label className="checkline keep-pages">
+                <input
+                  type="checkbox"
+                  checked={props.keepPageImages}
+                  onChange={(e) => props.onKeepPageImagesChange(e.target.checked)}
+                />
+                <span className="small">
+                  <strong>Keep each scanned page&rsquo;s picture</strong> beside its text, so the original is always
+                  at hand. Adds about 100&ndash;250 KB per page.
+                </span>
+              </label>
             )}
 
             {ocrMode === 'cloud' && !geminiSaved && !showKeyPanel && (

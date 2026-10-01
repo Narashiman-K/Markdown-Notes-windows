@@ -44,6 +44,8 @@ interface Props {
   pickFiles: () => Promise<MergeSource[]>
   /** Languages for pictures and scanned pages, as chosen in Convert to Markdown. */
   ocrLanguages?: readonly string[]
+  /** Scanned PDFs: keep each page's picture, as chosen in Convert to Markdown. */
+  keepPageImages?: boolean
   onClose: () => void
   /**
    * `includedOpen` says whether the open document went into the result. When it
@@ -118,6 +120,7 @@ export default function MergeDialog(props: Props): JSX.Element {
             const r = await convertToMarkdown(bytes, it.name, {
               ocrMode: 'offline',
               ocrLanguages: props.ocrLanguages,
+              keepPageImages: props.keepPageImages,
               onProgress: (m) => setProgress(`${it.name} (${i + 1} of ${working.length}): ${m}`)
             })
             if (!r.ok) throw new Error(r.error ?? 'Could not be converted.')

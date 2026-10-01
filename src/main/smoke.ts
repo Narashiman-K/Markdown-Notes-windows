@@ -382,16 +382,27 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
      * produces. ocr-kannada.png checks the bundled Kannada model is staged and
      * loads: read as English, the same image came out as Latin nonsense.
      */
-    const ocrCases: Array<{ file: string; expect: RegExp[]; ms: number; langs?: string[] }> = [
+    const ocrCases: Array<{ file: string; expect: RegExp[]; ms: number; langs?: string[]; keep?: boolean }> = [
       { file: 'ocr-sample.png', expect: [/Quarterly Operations Report/i, /fourteen percent/i], ms: 120_000 },
       {
         file: 'sample-scanned.pdf',
-        expect: [/Quarterly Operations Report/i, /## Page 1/, /## Page 2/, /fourteen percent/i],
-        ms: 240_000
+        // Also the original's page size and break, and each page's own
+        // picture kept beside its text (lib/pages.ts).
+        expect: [
+          /Quarterly Operations Report/i,
+          /## Page 1/,
+          /## Page 2/,
+          /fourteen percent/i,
+          /<!-- suprasuta:page-size width="\d/,
+          /<!-- suprasuta:page-break -->/,
+          /!\[Original page 2\]\(data:image\/jpeg;base64,[A-Za-z0-9+/]{1000}/
+        ],
+        ms: 240_000,
+        keep: true
       },
       { file: 'ocr-kannada.png', expect: [/ಕನ್ನಡ/, /ಬೆಂಗಳೂರು/, /ರಾಜಧಾನಿ/], ms: 120_000, langs: ['kan'] }
     ]
-    for (const { file, expect, ms, langs } of ocrCases) {
+    for (const { file, expect, ms, langs, keep } of ocrCases) {
       mark(`offline OCR ${file}`)
       const path = join(samples, file).replace(/\\/g, '\\\\')
       const raw = await jsWithTimeout<string>(
@@ -399,7 +410,7 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
         try {
           const read = await window.api.readBytes("${path}");
           if (!read.ok) return JSON.stringify({ ok:false, error:read.error });
-          const r = await window.__convert.convertToMarkdown(new Uint8Array(read.bytes), "${file}", { ocrMode: 'offline', ocrLanguages: ${JSON.stringify(langs ?? ['eng'])} });
+          const r = await window.__convert.convertToMarkdown(new Uint8Array(read.bytes), "${file}", { ocrMode: 'offline', ocrLanguages: ${JSON.stringify(langs ?? ['eng'])}, keepPageImages: ${keep === true} });
           return JSON.stringify({ ok:r.ok, code:r.code, error:r.error, markdown:(r.markdown||""), engine:(r.meta && r.meta.engine) || '' });
         } catch (e) { return JSON.stringify({ ok:false, error:String(e && e.message || e) }); }
       })()`,

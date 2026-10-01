@@ -1349,3 +1349,7 @@ html[data-reader] .markdown-body img { max-width: 100%; }
 .ocr-langs { margin: 6px 0 2px 26px; }
 .ocr-lang-list { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 4px 0; }
 .ocr-lang { margin: 0; }
+
+/* Page view: the desk the sheets sit on. */
+.preview-scroll.page-view { background: var(--chrome); }
+.keep-pages { margin-top: 6px; }

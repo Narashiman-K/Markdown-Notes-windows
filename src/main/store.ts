@@ -39,6 +39,8 @@ export interface Settings {
    * Loosely typed for the same reason; the renderer cleans it on load.
    */
   ocrLanguages: string[]
+  /** Scanned PDFs: keep each page's picture beside its text. */
+  keepPageImages: boolean
 }
 
 const DEFAULTS: Settings = {
@@ -55,7 +57,8 @@ const DEFAULTS: Settings = {
   aiReviewChanges: true,
   blockTints: ['codeBlock', 'blockquote'],
   reader: { width: 'medium', size: 'normal', spacing: 'normal', palette: 'auto' },
-  ocrLanguages: ['eng']
+  ocrLanguages: ['eng'],
+  keepPageImages: false
 }
 
 let cache: Settings | null = null

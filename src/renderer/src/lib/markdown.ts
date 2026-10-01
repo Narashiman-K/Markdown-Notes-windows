@@ -7,6 +7,7 @@ import DOMPurify from 'dompurify'
 import taskLists from 'markdown-it-task-lists'
 import footnote from 'markdown-it-footnote'
 import deflist from 'markdown-it-deflist'
+import { pagesPlugin, type PageSize } from './pages'
 
 /**
  * IMPORTANT: typographer / linkify / smartquotes stay OFF so that the rendered
@@ -33,6 +34,7 @@ export const md: MarkdownIt = new MarkdownIt({
   .use(taskLists, { enabled: true, label: true })
   .use(footnote)
   .use(deflist)
+  .use(pagesPlugin)
 
 /*
  * Stamps each block element with the source line it came from.
@@ -200,8 +202,12 @@ export function setLocalImageResolver(resolver: ((fileUrl: string) => string) | 
   localImageResolver = resolver
 }
 
-export function renderMarkdown(source: string, options?: { sourceLines?: boolean; screen?: boolean }): string {
-  const html = md.render(source, { sourceLines: options?.sourceLines === true })
+export function renderMarkdown(
+  source: string,
+  options?: { sourceLines?: boolean; screen?: boolean; pages?: boolean }
+): string {
+  // `pages`: each original page in a sheet of its own (see lib/pages.ts).
+  const html = md.render(source, { sourceLines: options?.sourceLines === true, pages: options?.pages === true })
   installFileLinkHook()
   const clean = DOMPurify.sanitize(html, PURIFY_CONFIG) as unknown as string
   const resolve = options?.screen ? localImageResolver : null
@@ -247,14 +253,20 @@ export function documentStats(source: string): { words: number; chars: number; l
   }
 }
 
-/** Wraps rendered HTML into a standalone document used for print / export. */
-export function standaloneHtml(title: string, bodyHtml: string, css: string, forPrint: boolean): string {
+/**
+ * Wraps rendered HTML into a standalone document used for print / export.
+ *
+ * `pageSize`, when the document recorded its original one, makes printing use
+ * that paper size; the original's page breaks print as breaks either way.
+ */
+export function standaloneHtml(title: string, bodyHtml: string, css: string, forPrint: boolean, pageSize?: PageSize | null): string {
+  const size = pageSize ? ` size: ${pageSize.width}pt ${pageSize.height}pt;` : ''
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <title>${title.replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</title>
 <style>${css}</style>
-${forPrint ? '<style>@page { margin: 18mm 16mm; } body { background: #fff; }</style>' : ''}
+${forPrint ? `<style>@page {${size} margin: 18mm 16mm; } body { background: #fff; }</style>` : ''}
 </head>
 <body class="mn-standalone"><article class="markdown-body">${bodyHtml}</article></body></html>`
 }

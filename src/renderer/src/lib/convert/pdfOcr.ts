@@ -23,15 +23,55 @@ import { titleFrom, tidy } from './normalise'
 import { openOfflineReader, unreadableWarning, UNREADABLE_CONFIDENCE, type OfflineReader } from './ocr'
 import { CloudCaller } from './cloudRetry'
 import { normaliseOcrLanguages } from '../ocrLanguages'
+import { PAGE_BREAK, pageSizeLine } from './pageNotes'
 
 /** Pixels across an A4 page at 300 dpi, the width pages are scaled towards. */
 const TARGET_WIDTH = 2480
+/**
+ * Width of a kept page picture: about 135 dpi on A4. Sharp enough to read on
+ * screen beside the text, and a JPEG of a text page at this size is roughly
+ * 100–250 KB, where the 300 dpi image read by OCR would be several MB.
+ */
+const KEEP_WIDTH = 1120
 
 export function canOcrPdf(): boolean {
   return typeof document !== 'undefined'
 }
 
-async function renderPage(page: pdfjs.PDFPageProxy): Promise<Blob> {
+interface RenderedPage {
+  /** For OCR: a lossless 300 dpi PNG. */
+  image: Blob
+  /** For keeping, when asked: a smaller JPEG as a data URL. */
+  keep?: string
+}
+
+/** A downscaled copy of the page as a JPEG data URL. */
+async function keepCopy(source: HTMLCanvasElement): Promise<string> {
+  const scale = Math.min(1, KEEP_WIDTH / source.width)
+  const small = document.createElement('canvas')
+  small.width = Math.round(source.width * scale)
+  small.height = Math.round(source.height * scale)
+  const g = small.getContext('2d')
+  if (!g) throw new Error('This system could not create a drawing surface for the page.')
+  g.imageSmoothingQuality = 'high'
+  g.drawImage(source, 0, 0, small.width, small.height)
+  try {
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      small.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not keep the page image.'))), 'image/jpeg', 0.72)
+    )
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error ?? new Error('Could not keep the page image.'))
+      reader.readAsDataURL(blob)
+    })
+  } finally {
+    small.width = 0
+    small.height = 0
+  }
+}
+
+async function renderPage(page: pdfjs.PDFPageProxy, keep: boolean): Promise<RenderedPage> {
   const natural = page.getViewport({ scale: 1 })
   // Small pages are scaled up towards 300 dpi; no page is drawn larger than
   // 4x, which bounds memory on an unusually large sheet.
@@ -56,9 +96,10 @@ async function renderPage(page: pdfjs.PDFPageProxy): Promise<Blob> {
      * for frames.
      */
     await page.render({ canvasContext: context, viewport, intent: 'print' }).promise
-    return await new Promise<Blob>((resolve, reject) =>
+    const image = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not capture the page image.'))), 'image/png')
     )
+    return { image, keep: keep ? await keepCopy(canvas) : undefined }
   } finally {
     // A rendered A4 page is ~35 MB of pixels; let it go before the next one.
     canvas.width = 0
@@ -80,6 +121,8 @@ export async function ocrScannedPdf(
   /** Set once the cloud has failed for good: every later page goes offline. */
   let cloudGaveUp: string | null = null
   const offlinePages: number[] = []
+  const kept: Array<string | undefined> = []
+  let pageSize: { width: number; height: number } | null = null
 
   const status = (n: number, f: number, extra = ''): void =>
     onProgress?.(`Scanned PDF — reading page ${n} of ${pages}…${extra}`, (n - 1 + f) / pages)
@@ -101,7 +144,12 @@ export async function ocrScannedPdf(
     for (let n = 1; n <= pages; n++) {
       status(n, 0)
       const page = await doc.getPage(n)
-      const image = await renderPage(page)
+      if (!pageSize) {
+        const v = page.getViewport({ scale: 1 })
+        pageSize = { width: v.width, height: v.height }
+      }
+      const { image, keep } = await renderPage(page, options.keepPageImages === true)
+      kept.push(keep)
       page.cleanup()
 
       if (wantCloud && !cloudGaveUp) {
@@ -136,8 +184,12 @@ export async function ocrScannedPdf(
     }
 
     const parts: string[] = [`# ${titleFrom(fileName)}`]
+    if (pageSize) parts.push(pageSizeLine(pageSize.width, pageSize.height))
     texts.forEach((text, i) => {
+      if (i > 0) parts.push(PAGE_BREAK)
       if (pages > 1) parts.push(`## Page ${i + 1}`)
+      // The picture first: page view puts it on the left, the text beside it.
+      if (kept[i]) parts.push(`![Original page ${i + 1}](${kept[i]} "suprasuta:scan")`)
       parts.push(text || '_No text could be read from this page._')
     })
 

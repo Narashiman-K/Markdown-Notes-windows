@@ -27,6 +27,12 @@ export interface ConvertOptions {
    * English when absent. See lib/ocrLanguages.ts for what is built in.
    */
   ocrLanguages?: readonly string[]
+  /**
+   * Scanned PDFs: keep each page's own picture beside the text read from it,
+   * so the exact original is always at hand. Off unless asked for; each page
+   * adds roughly 100–250 KB to the document.
+   */
+  keepPageImages?: boolean
   cloudOcr?: CloudOcr
   /** Injected for audio, which has no offline path. */
   transcribe?: (bytes: Uint8Array) => Promise<string>

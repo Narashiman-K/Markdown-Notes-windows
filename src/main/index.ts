@@ -431,7 +431,10 @@ function registerIpc(): void {
       const data = await w.webContents.printToPDF({
         printBackground: true,
         margins: { marginType: 'default' },
-        pageSize: 'A4'
+        // A4 unless the document recorded its original page size, which the
+        // page's own @page rule then carries (lib/pages.ts).
+        pageSize: 'A4',
+        preferCSSPageSize: true
       })
       await fsp.writeFile(r.filePath, data)
       return { ok: true, filePath: r.filePath }
@@ -472,7 +475,10 @@ function registerIpc(): void {
       const data = await layout.webContents.printToPDF({
         printBackground: true,
         margins: { marginType: 'default' },
-        pageSize: 'A4'
+        // A4 unless the document recorded its original page size, which the
+        // page's own @page rule then carries (lib/pages.ts).
+        pageSize: 'A4',
+        preferCSSPageSize: true
       })
 
       pdfPath = join(tmpdir(), `marknote-preview-${Date.now()}.pdf`)

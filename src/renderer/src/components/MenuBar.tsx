@@ -40,6 +40,8 @@ interface Props {
   onAction: (action: string, payload?: unknown) => void
   recentFiles: string[]
   theme: 'light' | 'dark' | 'system'
+  /** Ticks View > Page view. */
+  pageView?: boolean
 }
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() ?? p
@@ -49,7 +51,7 @@ const dirname = (p: string): string => {
   return parts.join('\\') || p
 }
 
-function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
+function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean): Menu[] {
   /*
    * Recent files are listed inline rather than in a submenu. The native menu
    * nested them, but one level of nesting for a list this short buys nothing
@@ -122,6 +124,7 @@ function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
         { label: 'View mode', action: 'view:mode:view', accelerator: 'Ctrl+Shift+V' },
         { label: 'Edit mode', action: 'view:mode:edit', accelerator: 'Ctrl+E' },
         { label: 'Reader mode', action: 'view:reader', accelerator: 'F9' },
+        { label: 'Page view', action: 'view:pages', checked: pageView },
         { separator: true, label: '' },
         { label: 'Zoom in', action: 'view:zoom:in', accelerator: 'Ctrl++' },
         { label: 'Zoom out', action: 'view:zoom:out', accelerator: 'Ctrl+-' },
@@ -213,7 +216,7 @@ function menus(recentFiles: string[], theme: Props['theme']): Menu[] {
   ]
 }
 
-export default function MenuBar({ onAction, recentFiles, theme }: Props): React.JSX.Element {
+export default function MenuBar({ onAction, recentFiles, theme, pageView = false }: Props): React.JSX.Element {
   const [open, setOpen] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -275,7 +278,7 @@ export default function MenuBar({ onAction, recentFiles, theme }: Props): React.
     onAction(action)
   }
 
-  const all = menus(recentFiles, theme)
+  const all = menus(recentFiles, theme, pageView)
 
   return (
     <div className="menubar" ref={ref}>

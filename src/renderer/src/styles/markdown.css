@@ -179,6 +179,72 @@
 }
 .mn-active { outline-color: var(--link, #0b6bcb); }
 
+/* ------------------------------------------------- original pages (lib/pages.ts) */
+
+/* Where an original page ended. A faint divider on screen; a page break in print. */
+.mn-page-break {
+  height: 0;
+  margin: 2.2em 0;
+  border-top: 1px dashed var(--chrome-border, #d0d0d0);
+}
+/* A scanned page's own picture, outside page view: framed, and kept to a size
+   that leaves the text beneath it in sight. */
+.markdown-body img.mn-scan {
+  display: block;
+  max-width: min(100%, 30em);
+  margin: 0.4em 0 1em;
+  border: 1px solid var(--chrome-border, #d0d0d0);
+}
+
+/* Page view: one sheet per original page, at the original page size. The
+   sizes come from --mn-page-w / --mn-page-h, set in em so zoom scales them. */
+.markdown-body.mn-page-view {
+  max-width: none;
+  padding: 24px 16px 45vh;
+}
+.mn-page-view .mn-sheet {
+  box-sizing: border-box;
+  width: min(var(--mn-page-w, 49.6em), 100%);
+  min-height: var(--mn-page-h, 70.2em);
+  margin: 0 auto 1.5em;
+  /* About 2 cm at A4, in proportion at any size. */
+  padding: 3.6em 3.4em;
+  background: var(--bg, #fff);
+  border: 1px solid var(--chrome-border, #e0e0e0);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+.mn-page-view .mn-sheet > *:first-child { margin-top: 0; }
+.mn-page-view .mn-page-break { display: none; }
+
+/* A scanned page: the original on the left, its text on the right, each a
+   full sheet, so the two can be read across. Narrow windows stack them. */
+.mn-page-view .mn-sheet-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5em;
+  width: min(calc(2 * var(--mn-page-w, 49.6em) + 1.5em), 100%);
+  margin: 0 auto 1.5em;
+}
+.mn-page-view .mn-sheet-pair > .mn-sheet {
+  width: auto;
+  margin: 0;
+  min-height: 0;
+}
+.mn-page-view .mn-sheet-original {
+  padding: 0;
+  align-self: start;
+}
+.mn-page-view .mn-sheet-original p { margin: 0; }
+.mn-page-view .mn-sheet-original img.mn-scan {
+  max-width: 100%;
+  width: 100%;
+  margin: 0;
+  border: 0;
+}
+@media (max-width: 900px) {
+  .mn-page-view .mn-sheet-pair { grid-template-columns: 1fr; }
+}
+
 /* ------------------------------------------------------------------ print */
 
 @media print {
@@ -196,6 +262,12 @@
   .markdown-body h2,
   .markdown-body h3 {
     break-after: avoid;
+  }
+  /* The original's page breaks, kept. */
+  .mn-page-break {
+    break-before: page;
+    margin: 0;
+    border: 0;
   }
   .mn-a[data-mn-note]::after { content: '💬'; }
   a[href^='http']::after {
