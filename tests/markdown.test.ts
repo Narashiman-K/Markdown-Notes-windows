@@ -79,3 +79,44 @@ describe('renderMarkdown source lines', () => {
     expect(html).toMatch(/<table data-line=/)
   })
 })
+
+/*
+ * Link and image safety.
+ *
+ * `file:` was opened up for images so that Insert > Image shows the picture,
+ * and these pin the edges of that decision: local images render, local links do
+ * not become clickable, and every script-carrying scheme stays refused. Added
+ * after the change shipped without a test of its own.
+ */
+describe('renderMarkdown link safety', () => {
+  it('renders a local image', () => {
+    const html = renderMarkdown('![photo](file:///C:/Users/me/a%20b.jpeg)')
+    expect(html).toContain('<img')
+    expect(html).toContain('src="file:///C:/Users/me/a%20b.jpeg"')
+  })
+
+  it('keeps a file: link as text, with no href', () => {
+    const html = renderMarkdown('[open](file:///C:/Windows/System32/calc.exe)')
+    expect(html).not.toMatch(/href="file:/i)
+    expect(html).toContain('open')
+  })
+
+  it('drops href from a raw-HTML file: anchor too', () => {
+    const html = renderMarkdown('<a href="file:///C:/x">x</a>')
+    expect(html).not.toMatch(/href="file:/i)
+  })
+
+  it('refuses javascript:, vbscript: and data: links', () => {
+    for (const url of ['javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'vbscript:msgbox(1)', 'data:text/html,<script>alert(1)</script>']) {
+      const html = renderMarkdown(`[x](${url})`)
+      expect(html, url).not.toMatch(/href="(?:javascript|vbscript|data):/i)
+    }
+  })
+
+  it('strips script, event handlers and javascript: from raw HTML', () => {
+    const html = renderMarkdown('<script>alert(1)</script><img src=x onerror="alert(1)"><a href="javascript:alert(1)">y</a>')
+    expect(html).not.toMatch(/<script/i)
+    expect(html).not.toMatch(/onerror/i)
+    expect(html).not.toMatch(/javascript:/i)
+  })
+})

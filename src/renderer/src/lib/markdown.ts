@@ -148,11 +148,26 @@ md.validateLink = (url: string): boolean =>
 const URI_ALLOWED =
   /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|file):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
 
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  const el = node as unknown as Element
-  if (el.tagName !== 'A') return
-  if (/^\s*file:/i.test(el.getAttribute('href') ?? '')) el.removeAttribute('href')
-})
+/*
+ * Installed on first render, not at module load.
+ *
+ * DOMPurify only has its full API when a window exists. Under plain Node — the
+ * unit tests that import this file for its parsing helpers, without ever
+ * rendering — the default export is a stub with no `addHook`, and calling it at
+ * module scope threw on import and took the whole test file down with it.
+ * Nothing that renders can reach `sanitize` without passing through here first,
+ * so deferring the hook loses no coverage.
+ */
+let fileLinkHookInstalled = false
+function installFileLinkHook(): void {
+  if (fileLinkHookInstalled) return
+  fileLinkHookInstalled = true
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    const el = node as unknown as Element
+    if (el.tagName !== 'A') return
+    if (/^\s*file:/i.test(el.getAttribute('href') ?? '')) el.removeAttribute('href')
+  })
+}
 
 const PURIFY_CONFIG = {
   ADD_TAGS: ['mark', 'ins', 'del', 'kbd', 'abbr', 'sub', 'sup', 'details', 'summary'],
@@ -163,6 +178,7 @@ const PURIFY_CONFIG = {
 
 export function renderMarkdown(source: string, options?: { sourceLines?: boolean }): string {
   const html = md.render(source, { sourceLines: options?.sourceLines === true })
+  installFileLinkHook()
   return DOMPurify.sanitize(html, PURIFY_CONFIG) as unknown as string
 }
 
