@@ -21,6 +21,7 @@ import * as pdfjs from 'pdfjs-dist'
 import type { ConvertResult, ConvertOptions } from './types'
 import { titleFrom, tidy } from './normalise'
 import { openOfflineReader, type OfflineReader } from './ocr'
+import { CloudCaller } from './cloudRetry'
 
 /** Pixels across an A4 page at 300 dpi, the width pages are scaled towards. */
 const TARGET_WIDTH = 2480
@@ -70,37 +71,57 @@ export async function ocrScannedPdf(
   options: ConvertOptions = {}
 ): Promise<ConvertResult> {
   const { onProgress } = options
-  const useCloud = options.ocrMode === 'cloud' && !!options.cloudOcr
-  const engine = useCloud ? 'gemini' : 'tesseract'
+  const wantCloud = options.ocrMode === 'cloud' && !!options.cloudOcr
 
   const doc = await pdfjs.getDocument({ data: bytes, useWorkerFetch: false }).promise
   const pages = doc.numPages
   let reader: OfflineReader | null = null
+  /** Set once the cloud has failed for good: every later page goes offline. */
+  let cloudGaveUp: string | null = null
+  const offlinePages: number[] = []
+
+  const status = (n: number, f: number, extra = ''): void =>
+    onProgress?.(`Scanned PDF — reading page ${n} of ${pages}…${extra}`, (n - 1 + f) / pages)
+
+  const cloud = new CloudCaller({
+    onWait: (seconds, attempt) =>
+      onProgress?.(`Scanned PDF — the cloud service is busy; trying again in ${seconds} s (attempt ${attempt + 1})…`)
+  })
+
+  const readOffline = async (n: number, image: Blob): Promise<{ text: string; confidence: number }> => {
+    reader ??= await openOfflineReader(onProgress)
+    return reader.read(image, (f) => status(n, f, wantCloud ? ' (offline)' : ''))
+  }
 
   try {
-    if (!useCloud) reader = await openOfflineReader(onProgress)
-
     const texts: string[] = []
     const confidences: number[] = []
 
     for (let n = 1; n <= pages; n++) {
-      const at = (f: number): number => (n - 1 + f) / pages
-      onProgress?.(`Scanned PDF — reading page ${n} of ${pages}…`, at(0))
-
+      status(n, 0)
       const page = await doc.getPage(n)
       const image = await renderPage(page)
       page.cleanup()
 
-      if (reader) {
-        const { text, confidence } = await reader.read(image, (f) =>
-          onProgress?.(`Scanned PDF — reading page ${n} of ${pages}…`, at(f))
-        )
-        texts.push(text)
-        if (text) confidences.push(confidence)
-      } else {
-        const raw = await options.cloudOcr!(new Uint8Array(await image.arrayBuffer()), 'image/png')
-        texts.push(raw.trim().replace(/^```(?:markdown)?\s*\n?/i, '').replace(/\n?```\s*$/i, ''))
+      if (wantCloud && !cloudGaveUp) {
+        try {
+          const bytesOut = new Uint8Array(await image.arrayBuffer())
+          const raw = await cloud.run(() => options.cloudOcr!(bytesOut, 'image/png'))
+          texts.push(raw.trim().replace(/^```(?:markdown)?\s*\n?/i, '').replace(/\n?```\s*$/i, ''))
+          continue
+        } catch (err) {
+          // Retries are spent, or the error is one retrying cannot fix. Rather
+          // than lose the pages already read, carry on offline from here: a
+          // service that has just refused us is unlikely to accept the next
+          // page, and waiting out its backoff on every page would cost minutes.
+          cloudGaveUp = String((err as Error)?.message ?? err)
+        }
       }
+
+      const { text, confidence } = await readOffline(n, image)
+      texts.push(text)
+      if (text) confidences.push(confidence)
+      if (wantCloud) offlinePages.push(n)
     }
 
     if (!texts.some((t) => t.length > 0)) {
@@ -109,7 +130,7 @@ export async function ocrScannedPdf(
         code: 'NO_TEXT',
         error:
           'This is a scanned PDF, and no text could be read from any of its pages. ' +
-          (useCloud ? 'The pages may be blank or unreadable.' : 'Offline OCR works best on clear, printed text — cloud OCR may do better.')
+          (wantCloud && !cloudGaveUp ? 'The pages may be blank or unreadable.' : 'Offline OCR works best on clear, printed text — cloud OCR may do better.')
       }
     }
 
@@ -122,19 +143,33 @@ export async function ocrScannedPdf(
     const confidence = confidences.length
       ? Math.round(confidences.reduce((a, b) => a + b, 0) / confidences.length)
       : undefined
-    const note =
-      `\n\n> Read from a scanned PDF by ${useCloud ? 'cloud' : 'offline'} OCR. Check names and figures against the original.` +
-      (confidence !== undefined && confidence < 70
-        ? ' Offline OCR reported low confidence; cloud OCR would likely read it more accurately.'
-        : '')
+    const allCloud = wantCloud && offlinePages.length === 0
+    const allOffline = !wantCloud || offlinePages.length === pages
+    const how = allCloud ? 'cloud' : allOffline ? 'offline' : 'cloud and offline'
+    let note = `\n\n> Read from a scanned PDF by ${how} OCR. Check names and figures against the original.`
+    if (wantCloud && offlinePages.length) {
+      const which = offlinePages.length === pages ? 'Every page was' : `Page${offlinePages.length > 1 ? 's' : ''} ${offlinePages.join(', ')} ${offlinePages.length > 1 ? 'were' : 'was'}`
+      note += ` ${which} read offline because the cloud service was unavailable (${cloudGaveUp ?? 'no reason given'}).`
+    }
+    if (confidence !== undefined && confidence < 70) {
+      note += ' Offline OCR reported low confidence; cloud OCR would likely read it more accurately.'
+    }
 
     return {
       ok: true,
       markdown: tidy(parts) + note,
-      meta: { engine, pages, scanned: true, ...(confidence !== undefined ? { confidence } : {}) }
+      meta: {
+        engine: allCloud ? 'gemini' : allOffline ? 'tesseract' : 'gemini+tesseract',
+        pages,
+        scanned: true,
+        ...(offlinePages.length && wantCloud ? { offlinePages } : {}),
+        ...(confidence !== undefined ? { confidence } : {})
+      }
     }
   } finally {
-    await reader?.close()
+    // Opened lazily inside readOffline, which TypeScript's flow analysis
+    // cannot see, so it would otherwise narrow `reader` to null here.
+    await (reader as OfflineReader | null)?.close()
     await doc.destroy()
   }
 }
