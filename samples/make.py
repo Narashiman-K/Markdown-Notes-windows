@@ -87,4 +87,12 @@ for i in range(8000):
     w.writeframes(struct.pack("<h", int(3000*math.sin(2*math.pi*440*i/8000))))
 w.close()
 
+# ---- Scanned PDF: two pages of a photographed report, with no text layer ----
+# What a flatbed scanner produces. Built from ocr-sample.png, the MCP package's
+# known-good OCR fixture, so the expected text is known. The smoke test reads it
+# through offline OCR; before October 2026 the app refused it as SCANNED_PDF.
+from PIL import Image
+page = Image.open("ocr-sample.png").convert("RGB")
+page.save("sample-scanned.pdf", save_all=True, append_images=[page.copy()], resolution=150)
+
 print("done:", sorted(os.listdir(".")))

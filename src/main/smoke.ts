@@ -370,6 +370,54 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       )
     }
 
+    /*
+     * 13b — offline OCR, on an image and on a scanned PDF.
+     *
+     * Neither had ever been exercised here, which is how offline OCR in this
+     * build came to be blocked three ways at once without anyone noticing:
+     * no bundled engine, a CSP that refuses WebAssembly and blob workers, and
+     * a CSP that refuses the CDN the engine falls back to. ocr-sample.png is
+     * the MCP package's known-good OCR fixture; sample-scanned.pdf is the
+     * same image as two pages with no text layer — what a flatbed scanner
+     * produces.
+     */
+    const ocrCases: Array<{ file: string; expect: RegExp[]; ms: number }> = [
+      { file: 'ocr-sample.png', expect: [/Quarterly Operations Report/i, /fourteen percent/i], ms: 120_000 },
+      {
+        file: 'sample-scanned.pdf',
+        expect: [/Quarterly Operations Report/i, /## Page 1/, /## Page 2/, /fourteen percent/i],
+        ms: 240_000
+      }
+    ]
+    for (const { file, expect, ms } of ocrCases) {
+      mark(`offline OCR ${file}`)
+      const path = join(samples, file).replace(/\\/g, '\\\\')
+      const raw = await jsWithTimeout<string>(
+        `(async () => {
+        try {
+          const read = await window.api.readBytes("${path}");
+          if (!read.ok) return JSON.stringify({ ok:false, error:read.error });
+          const r = await window.__convert.convertToMarkdown(new Uint8Array(read.bytes), "${file}", { ocrMode: 'offline' });
+          return JSON.stringify({ ok:r.ok, code:r.code, error:r.error, markdown:(r.markdown||""), engine:(r.meta && r.meta.engine) || '' });
+        } catch (e) { return JSON.stringify({ ok:false, error:String(e && e.message || e) }); }
+      })()`,
+        ms,
+        JSON.stringify({ ok: false, error: `timed out after ${ms / 1000}s` })
+      )
+      const parsed = JSON.parse(raw) as { ok: boolean; code?: string; error?: string; markdown?: string; engine?: string }
+      if (!parsed.ok) {
+        check(`offline OCR ${file}`, false, `${parsed.code ?? ''} ${parsed.error ?? ''}`.trim())
+        continue
+      }
+      const md = parsed.markdown ?? ''
+      const missing = expect.filter((re) => !re.test(md))
+      check(
+        `offline OCR ${file}`,
+        missing.length === 0 && parsed.engine === 'tesseract',
+        missing.length ? `missing ${missing.map(String).join(' ')} | got: ${md.slice(0, 160)}` : `${md.length} chars, engine ${parsed.engine}`
+      )
+    }
+
     // The indented .txt is the original annotation bug: after conversion no line
     // may start with four spaces or a tab, or highlights will not render.
     const txtPath = join(samples, 'sample.txt').replace(/\\/g, '\\\\')
