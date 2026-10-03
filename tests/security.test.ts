@@ -85,11 +85,13 @@ describe('converter security', () => {
     if (!r.ok) expect(r.error).toMatch(/incomplete|cut off/i)
   })
 
-  it.skip('does not hang on a fragment carrying a genuine end record (KNOWN GAP until Phase 1b)', () => {
+  it.skip('a fragment carrying a genuine end record hangs SheetJS itself (checked in the app instead)', () => {
     // SheetJS loops forever on a 10-byte prefix of a real workbook followed by
     // its real end-of-central-directory record; the truncation guard cannot
-    // see it, because the record is there. Only parsing in a worker with a
-    // time limit can interrupt that. Remove the skip when Phase 1b lands.
+    // see it, because the record is there. The apps read spreadsheets in a
+    // worker that is stopped at a time limit (sheet.ts), but these tests run
+    // without a browser, so there is no worker to stop and this would hang
+    // the run. The Windows smoke test checks it in the real app.
     let at = real.length - 22
     while (at >= 0 && !(real[at] === 0x50 && real[at + 1] === 0x4b && real[at + 2] === 5 && real[at + 3] === 6)) at--
     const tail = real.slice(at)

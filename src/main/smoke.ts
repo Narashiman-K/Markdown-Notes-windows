@@ -431,6 +431,41 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       )
     }
 
+    /*
+     * 13c — spreadsheets are read in a worker that is stopped at a time limit
+     * (Phase 1b). A real workbook must come back from the worker; a crafted
+     * one that makes SheetJS loop forever (a 10-byte prefix plus the genuine
+     * end-of-central-directory record) must be stopped, not freeze the window.
+     */
+    mark('spreadsheet worker')
+    const xlsxPath = join(samples, 'sample.xlsx').replace(/\\/g, '\\\\')
+    const sheetRaw = await jsWithTimeout<string>(
+      `(async () => {
+        const read = await window.api.readBytes("${xlsxPath}");
+        const real = new Uint8Array(read.bytes);
+        const good = await window.__convert.convertToMarkdown(real.slice(), "sample.xlsx", {});
+        let at = real.length - 22;
+        while (at >= 0 && !(real[at] === 0x50 && real[at+1] === 0x4b && real[at+2] === 5 && real[at+3] === 6)) at--;
+        const tail = real.slice(at);
+        const crafted = new Uint8Array(10 + tail.length);
+        crafted.set(real.slice(0, 10)); crafted.set(tail, 10);
+        const t = performance.now();
+        const bad = await window.__convert.convertToMarkdown(crafted, "crafted.xlsx", { timeLimitMs: 3000 });
+        const ms = Math.round(performance.now() - t);
+        const alive = await new Promise((r) => requestAnimationFrame(() => r(true)));
+        return JSON.stringify({ goodOk: good.ok, isolated: !!(good.meta && good.meta.isolated), badOk: bad.ok, badError: bad.error || '', ms, alive });
+      })()`,
+      30_000,
+      JSON.stringify({ goodOk: false, error: 'timed out: the window froze' })
+    )
+    const sheet = JSON.parse(sheetRaw) as { goodOk: boolean; isolated: boolean; badOk: boolean; badError: string; ms: number; alive: boolean }
+    check('a real spreadsheet is read in the worker', sheet.goodOk && sheet.isolated, sheetRaw)
+    check(
+      'a spreadsheet that hangs SheetJS is stopped at the time limit',
+      sheet.badOk === false && /took longer than 3 seconds/.test(sheet.badError) && sheet.ms < 8000 && sheet.alive,
+      sheetRaw
+    )
+
     // The indented .txt is the original annotation bug: after conversion no line
     // may start with four spaces or a tab, or highlights will not render.
     const txtPath = join(samples, 'sample.txt').replace(/\\/g, '\\\\')
