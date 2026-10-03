@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, nativeTheme, protocol, net, type IpcMainInvokeEvent } from 'electron'
-import { join, basename, dirname, extname } from 'node:path'
+import { join, basename, dirname, extname, isAbsolute } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { promises as fsp, watch as fsWatch, existsSync, rmSync, type FSWatcher } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -345,10 +345,35 @@ async function disposeHidden(w: BrowserWindow): Promise<void> {
 
 /* ------------------------------------------------------------------- ipc */
 
+/*
+ * The folder a file dialog opens in.
+ *
+ * Until Electron 43, a dialog given no starting folder let Windows choose,
+ * which meant the folder last used. Since 43 it opens in Downloads every time
+ * instead, so Open, Convert, Insert image and the exports would all have
+ * started in Downloads, whatever the user had just been working in. The app
+ * now remembers the folder itself, across restarts, and falls back to
+ * Documents.
+ */
+function lastFolder(): string {
+  const dir = getSettings().lastDialogDir
+  return dir && existsSync(dir) ? dir : app.getPath('documents')
+}
+
+function rememberFolder(filePath: string | undefined): void {
+  if (filePath) setSettings({ lastDialogDir: dirname(filePath) })
+}
+
+/** A suggested file name, placed in the last folder unless it has one. */
+function inLastFolder(name: string): string {
+  return isAbsolute(name) ? name : join(lastFolder(), basename(name))
+}
+
 function registerIpc(): void {
   ipcMain.handle('dialog:open', async () => {
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: 'Open document',
+      defaultPath: lastFolder(),
       properties: ['openFile'],
       filters: [
         { name: 'Markdown & text', extensions: READABLE_EXTS },
@@ -357,6 +382,7 @@ function registerIpc(): void {
       ]
     })
     if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+    rememberFolder(r.filePaths[0])
     return readOrOfferConversion(r.filePaths[0])
   })
 
@@ -369,11 +395,12 @@ function registerIpc(): void {
     if (!target || args.saveAs) {
       const r = await dialog.showSaveDialog(mainWindow!, {
         title: args.saveAs ? 'Save a copy as' : 'Save Markdown file',
-        defaultPath: target ?? join(app.getPath('documents'), 'Untitled.md'),
+        defaultPath: target ?? join(lastFolder(), 'Untitled.md'),
         filters: MD_FILTERS
       })
       if (r.canceled || !r.filePath) return { ok: false, canceled: true }
       target = r.filePath
+      rememberFolder(target)
       if (!/\.[a-z0-9]+$/i.test(target)) target += '.md'
     }
     try {
@@ -391,10 +418,11 @@ function registerIpc(): void {
   ipcMain.handle('file:exportHtml', async (_e, args: { html: string; suggestedName: string }) => {
     const r = await dialog.showSaveDialog(mainWindow!, {
       title: 'Export as HTML',
-      defaultPath: args.suggestedName.replace(/\.[^.]+$/, '') + '.html',
+      defaultPath: inLastFolder(args.suggestedName.replace(/\.[^.]+$/, '') + '.html'),
       filters: [{ name: 'HTML', extensions: ['html'] }]
     })
     if (r.canceled || !r.filePath) return { ok: false, canceled: true }
+    rememberFolder(r.filePath)
     try {
       await fsp.writeFile(r.filePath, args.html, 'utf8')
       return { ok: true, filePath: r.filePath }
@@ -406,10 +434,11 @@ function registerIpc(): void {
   ipcMain.handle('file:exportMarkdown', async (_e, args: { text: string; suggestedName: string }) => {
     const r = await dialog.showSaveDialog(mainWindow!, {
       title: 'Export Markdown without annotations',
-      defaultPath: args.suggestedName.replace(/\.[^.]+$/, '') + '-clean.md',
+      defaultPath: inLastFolder(args.suggestedName.replace(/\.[^.]+$/, '') + '-clean.md'),
       filters: MD_FILTERS
     })
     if (r.canceled || !r.filePath) return { ok: false, canceled: true }
+    rememberFolder(r.filePath)
     try {
       await fsp.writeFile(r.filePath, args.text, 'utf8')
       return { ok: true, filePath: r.filePath }
@@ -421,16 +450,19 @@ function registerIpc(): void {
   ipcMain.handle('file:exportPdf', async (_e, args: { html: string; suggestedName: string }) => {
     const r = await dialog.showSaveDialog(mainWindow!, {
       title: 'Export as PDF',
-      defaultPath: args.suggestedName.replace(/\.[^.]+$/, '') + '.pdf',
+      defaultPath: inLastFolder(args.suggestedName.replace(/\.[^.]+$/, '') + '.pdf'),
       filters: [{ name: 'PDF', extensions: ['pdf'] }]
     })
     if (r.canceled || !r.filePath) return { ok: false, canceled: true }
+    rememberFolder(r.filePath)
     let w: BrowserWindow | null = null
     try {
       w = await renderInHiddenWindow(args.html)
       const data = await w.webContents.printToPDF({
         printBackground: true,
-        margins: { marginType: 'default' },
+        // Margins left to Electron's default (1 cm). The old `marginType`
+        // option is gone in Electron 44; the printed page's own @page rule
+        // sets the margins it wants.
         // A4 unless the document recorded its original page size, which the
         // page's own @page rule then carries (lib/pages.ts).
         pageSize: 'A4',
@@ -474,7 +506,9 @@ function registerIpc(): void {
       layout = await renderInHiddenWindow(args.html)
       const data = await layout.webContents.printToPDF({
         printBackground: true,
-        margins: { marginType: 'default' },
+        // Margins left to Electron's default (1 cm). The old `marginType`
+        // option is gone in Electron 44; the printed page's own @page rule
+        // sets the margins it wants.
         // A4 unless the document recorded its original page size, which the
         // page's own @page rule then carries (lib/pages.ts).
         pageSize: 'A4',
@@ -577,6 +611,7 @@ function registerIpc(): void {
   ipcMain.handle('convert:pickInput', async () => {
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: 'Choose documents to convert to Markdown',
+      defaultPath: lastFolder(),
       properties: ['openFile', 'multiSelections'],
       filters: [
         { name: 'All supported', extensions: CONVERTIBLE_EXTS },
@@ -587,6 +622,7 @@ function registerIpc(): void {
       ]
     })
     if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true }
+    rememberFolder(r.filePaths[0])
     return { ok: true, filePaths: r.filePaths }
   })
 
@@ -718,10 +754,12 @@ function registerIpc(): void {
   ipcMain.handle('dialog:pickImage', async () => {
     const r = await dialog.showOpenDialog(mainWindow!, {
       title: 'Insert image',
+      defaultPath: lastFolder(),
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'] }]
     })
     if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+    rememberFolder(r.filePaths[0])
     return { ok: true, filePath: r.filePaths[0] }
   })
 

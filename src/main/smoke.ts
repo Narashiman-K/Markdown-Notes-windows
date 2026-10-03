@@ -3,7 +3,7 @@
  * executes for real users. It drives the real renderer through the real
  * preload/IPC bridge and writes screenshots + a JSON result to `out/smoke/`.
  */
-import { app, net, type BrowserWindow } from 'electron'
+import { app, net, BrowserWindow } from 'electron'
 import { promises as fsp, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -437,6 +437,54 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
      * one that makes SheetJS loop forever (a 10-byte prefix plus the genuine
      * end-of-central-directory record) must be stopped, not freeze the window.
      */
+    /*
+     * 13d — printing on Electron 44, whose printToPDF lost the `marginType`
+     * option. Two pages with a recorded page size of Letter landscape must
+     * print as two pages of 792 x 612 points: the page break kept, and the
+     * page's own @page size preferred over the A4 default (lib/pages.ts).
+     */
+    mark('print to PDF')
+    {
+      const printer = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
+      try {
+        const html =
+          '<!doctype html><html><head><style>@page { size: 792pt 612pt; margin: 18mm 16mm; }' +
+          ' .mn-page-break { break-before: page; }</style></head><body>' +
+          '<p>First page.</p><div class="mn-page-break"></div><p>Second page.</p></body></html>'
+        await printer.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+        const pdf = await printer.webContents.printToPDF({ printBackground: true, pageSize: 'A4', preferCSSPageSize: true })
+        const text = pdf.toString('latin1')
+        const pages = (text.match(/\/Type\s*\/Page[^s]/g) ?? []).length
+        const box = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(text)
+        const size = box ? `${Math.round(Number(box[1]))}x${Math.round(Number(box[2]))}` : 'none'
+        check('print keeps the page break and the original page size', pages === 2 && size === '792x612', `${pages} pages, ${size}`)
+      } finally {
+        printer.destroy()
+      }
+    }
+
+    /*
+     * pdf.js should read in its own worker. "Setting up fake worker" in the
+     * console means it fell back to the page's thread, where a large PDF
+     * stalls the window.
+     */
+    mark('pdf.js worker')
+    {
+      const seen: string[] = []
+      const listen = (e: { message: string }): void => {
+        if (/fake worker|pdf\.worker/i.test(e.message)) seen.push(e.message.slice(0, 160))
+      }
+      win.webContents.on('console-message', listen)
+      const pdfPath = join(samples, 'sample.pdf').replace(/\\/g, '\\\\')
+      await jsWithTimeout<string>(
+        `(async () => { const r = await window.api.readBytes("${pdfPath}"); const c = await window.__convert.convertToMarkdown(new Uint8Array(r.bytes), "sample.pdf", {}); return String(c.ok) })()`,
+        30_000,
+        'timeout'
+      )
+      win.webContents.off('console-message', listen)
+      check('pdf.js reads in its own worker', seen.length === 0, seen.join(' | ') || 'no fallback')
+    }
+
     mark('spreadsheet worker')
     const xlsxPath = join(samples, 'sample.xlsx').replace(/\\/g, '\\\\')
     const sheetRaw = await jsWithTimeout<string>(

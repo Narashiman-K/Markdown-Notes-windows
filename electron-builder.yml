@@ -22,6 +22,29 @@ extraResources:
 # Ship only English resources; each extra locale is a separate .pak file.
 electronLanguages: [en-US]
 
+# Electron's fuses: switches compiled into the packaged executable, which no
+# setting, environment variable or command-line flag can turn back on. Each
+# one closes a way to make the installed app run code it did not ship with.
+#   runAsNode                  ELECTRON_RUN_AS_NODE=1 would turn the app into a
+#                              plain Node.js runtime for any script.
+#   enableNodeOptions...       NODE_OPTIONS could preload arbitrary code.
+#   enableNodeCliInspect...    --inspect would open a debugger port.
+#   onlyLoadAppFromAsar        code is loaded from app.asar only, never from a
+#                              loose app/ folder dropped beside it.
+#   enableCookieEncryption     cookies on disk are encrypted with the user's
+#                              Windows keys.
+# Left at Electron's defaults for now, to revisit in Phase 4:
+#   enableEmbeddedAsarIntegrityValidation  still experimental outside macOS.
+#   grantFileProtocolExtraPrivileges       the app's pages load from file://
+#                              today; turning this off first needs them served
+#                              from a private protocol instead.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableCookieEncryption: true
+
 
 fileAssociations:
   - ext: md

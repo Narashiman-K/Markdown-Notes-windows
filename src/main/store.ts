@@ -41,6 +41,8 @@ export interface Settings {
   ocrLanguages: string[]
   /** Scanned PDFs: keep each page's picture beside its text. */
   keepPageImages: boolean
+  /** The folder a file dialog last used; dialogs open there (Electron 43+ would pick Downloads). */
+  lastDialogDir?: string
 }
 
 const DEFAULTS: Settings = {
