@@ -22,7 +22,7 @@ import type { ConvertResult, ConvertOptions } from './types'
 import { titleFrom, tidy } from './normalise'
 import { openOfflineReader, unreadableWarning, UNREADABLE_CONFIDENCE, type OfflineReader } from './ocr'
 import { CloudCaller } from './cloudRetry'
-import { normaliseOcrLanguages } from '../ocrLanguages'
+import { normaliseOcrLanguages } from './ocrLanguages'
 import { PAGE_BREAK, pageSizeLine } from './pageNotes'
 
 /** Pixels across an A4 page at 300 dpi, the width pages are scaled towards. */

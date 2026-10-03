@@ -10,6 +10,7 @@ import * as XLSX from 'xlsx'
 import JSZip from 'jszip'
 import type { ConvertResult } from './types'
 import { htmlToMarkdown, parseXml } from './html'
+import { convertRuntime } from './runtime'
 import { titleFrom, tidy, toTable } from './normalise'
 
 /**
@@ -57,7 +58,10 @@ export function promoteTableHeaders(html: string): string {
 export async function convertDocx(bytes: Uint8Array, fileName: string): Promise<ConvertResult> {
   const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
   const result = await mammoth.convertToHtml(
-    { arrayBuffer: buffer },
+    // Cast because the shape is chosen by the host: an ArrayBuffer in a
+    // browser, a Buffer under Node. mammoth's own union cannot express
+    // "whichever of these the environment supports".
+    convertRuntime().docxSource(bytes, buffer) as unknown as Parameters<typeof mammoth.convertToHtml>[0],
     {
       styleMap: [
         "p[style-name='Title'] => h1:fresh",
@@ -82,7 +86,43 @@ export async function convertDocx(bytes: Uint8Array, fileName: string): Promise<
 
 /* ------------------------------------------------------- spreadsheets/ODS */
 
+/**
+ * True for bytes that start like a ZIP archive but never finish.
+ *
+ * Every complete ZIP ends with an end-of-central-directory record, signature
+ * `PK\x05\x06`, within the last 65,557 bytes (22 for the record, up to 65,535
+ * of comment). A file that opens with `PK` and has none was cut off — an
+ * interrupted download, a failed copy.
+ *
+ * This exists because SheetJS, in both 0.18.5 and 0.20.3, never returns from
+ * `XLSX.read` on some such fragments: a 10-byte or a 30-to-120-byte prefix of
+ * a real workbook spins forever. Because conversion is synchronous, that froze
+ * the whole host — the app window, the browser tab, the MCP server, or VS
+ * Code's shared extension host.
+ *
+ * This is a stop-gap, not the fix. It catches the accidental case, which is
+ * the common one, but a file *built* to hang the parser can carry a genuine
+ * end record and get past it; tests/security.test.mjs keeps that case on
+ * record as a skipped test. Only parsing in a worker with a time limit can
+ * interrupt a synchronous loop.
+ */
+function isTruncatedZip(bytes: Uint8Array): boolean {
+  if (bytes.length < 2 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return false
+  const floor = Math.max(0, bytes.length - 65557)
+  for (let i = bytes.length - 22; i >= floor; i--) {
+    if (bytes[i] === 0x50 && bytes[i + 1] === 0x4b && bytes[i + 2] === 0x05 && bytes[i + 3] === 0x06) return false
+  }
+  return true
+}
+
 export function convertSheet(bytes: Uint8Array, fileName: string): ConvertResult {
+  if (isTruncatedZip(bytes)) {
+    return {
+      ok: false,
+      code: 'CONVERT_FAILED',
+      error: 'This spreadsheet is incomplete — the file appears to have been cut off, for example by an interrupted download.'
+    }
+  }
   const book = XLSX.read(bytes, { type: 'array', cellDates: true })
   const parts: string[] = [`# ${titleFrom(fileName)}`]
   let populated = 0

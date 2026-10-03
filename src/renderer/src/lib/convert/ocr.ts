@@ -17,7 +17,8 @@
 import type { ConvertResult, ConvertOptions } from './types'
 import { extensionOf } from './types'
 import { titleFrom, tidy } from './normalise'
-import { normaliseOcrLanguages, describeOcrLanguages, tidyOcrText, keepOcrLineBreaks } from '../ocrLanguages'
+import { normaliseOcrLanguages, describeOcrLanguages, tidyOcrText, keepOcrLineBreaks } from './ocrLanguages'
+import { convertRuntime } from './runtime'
 
 const MIME: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -59,21 +60,18 @@ async function toPngIfNeeded(bytes: Uint8Array, fileName: string): Promise<Blob>
  * exists for — and puts a third party in the request path. These paths are
  * relative to the app's own origin, and on Android they resolve inside the APK.
  */
-function localPaths(): { workerPath: string; corePath: string; langPath: string; workerBlobURL: boolean } {
-  const base = new URL('tesseract/', document.baseURI).href
+function localPaths(): { workerPath?: string; corePath?: string; langPath?: string; cachePath?: string; workerBlobURL: boolean } {
   return {
-    workerPath: `${base}worker.min.js`,
-    // A directory: tesseract.js appends the core filename itself after probing
-    // for SIMD support, so both variants must be present.
-    corePath: base,
-    langPath: base,
+    // Where the files are depends on the host: the app's own origin in a
+    // browser, the package's vendor folder under Node (see runtime.ts).
+    ...convertRuntime().tesseractPaths(),
     /*
      * Start the worker straight from its URL rather than from a blob: wrapper.
      * The wrapper exists so a worker can be started from a cross-origin CDN
      * script, which these local paths never need. Under the Windows app's
      * Content-Security-Policy it was fatal: a blob: worker is refused, so
      * offline OCR there failed at "Failed to construct 'Worker'" on every
-     * image. Loading from the app's own origin needs no policy exception.
+     * image. Node ignores the setting.
      */
     workerBlobURL: false
   }
@@ -96,15 +94,19 @@ export function unreadableWarning(confidence: number, languages?: readonly strin
   const read = describeOcrLanguages(normaliseOcrLanguages(languages))
   return (
     `> **This result is probably not readable.** Offline OCR was only ${confidence}% confident reading it as ${read}. ` +
-    'That usually means the pages are in another language or script. In Convert to Markdown, tick the ' +
-    "document's language under **Text language** and convert again, or choose **Cloud** OCR.\n\n"
+    'That usually means the pages are in another language or script. Convert again with the ' +
+    "document's language chosen for offline OCR (in the apps: **Text language** in Convert to Markdown), " +
+    'or use **Cloud** OCR.\n\n'
   )
 }
 
 /** One loaded Tesseract engine, reusable across many images. */
 export interface OfflineReader {
-  /** Reads one image. `onFraction` receives 0–1 progress for this image alone. */
-  read(image: Blob, onFraction?: (fraction: number) => void): Promise<{ text: string; confidence: number }>
+  /**
+   * Reads one image. `onFraction` receives 0–1 progress for this image alone.
+   * A Blob in a browser; under Node, whatever runtime.ts's ocrImageInput gives.
+   */
+  read(image: unknown, onFraction?: (fraction: number) => void): Promise<{ text: string; confidence: number }>
   close(): Promise<void>
 }
 
@@ -156,7 +158,7 @@ export async function openOfflineReader(
     async read(image, onFraction) {
       report = onFraction ?? (() => {})
       try {
-        const { data } = await worker.recognize(image)
+        const { data } = await worker.recognize(image as Parameters<typeof worker.recognize>[0])
         return {
           text: keepOcrLineBreaks(tidyOcrText(data.text ?? '')).trim(),
           confidence: Math.round(data.confidence ?? 0)
@@ -179,7 +181,7 @@ async function offlineOcr(
 ): Promise<ConvertResult> {
   const reader = await openOfflineReader(onProgress, languages)
   try {
-    const image = await toPngIfNeeded(bytes, fileName)
+    const image = convertRuntime().ocrImageInput(bytes, await toPngIfNeeded(bytes, fileName))
     const { text, confidence } = await reader.read(image, (f) =>
       onProgress?.('Reading text from the image…', 0.3 + f * 0.7)
     )
