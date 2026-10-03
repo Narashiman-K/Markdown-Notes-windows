@@ -15,7 +15,8 @@ import { JSDOM } from 'jsdom'
  * without one its default export is a factory rather than the sanitiser. So
  * the globals go in first and the module is pulled in afterwards.
  *
- * Deliberately not `// @vitest-environment jsdom`: that directive is what made
+ * Deliberately not Vitest's jsdom environment directive (written out here,
+ * Vitest 5 obeys it even inside this comment): that directive is what made
  * office.test.ts fail on Windows, because it makes Vite externalise the node
  * builtins the converters rely on.
  */
