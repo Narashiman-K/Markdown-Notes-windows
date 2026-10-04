@@ -400,7 +400,20 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
         ms: 240_000,
         keep: true
       },
-      { file: 'ocr-kannada.png', expect: [/ಕನ್ನಡ/, /ಬೆಂಗಳೂರು/, /ರಾಜಧಾನಿ/], ms: 120_000, langs: ['kan'] }
+      { file: 'ocr-kannada.png', expect: [/ಕನ್ನಡ/, /ಬೆಂಗಳೂರು/, /ರಾಜಧಾನಿ/], ms: 120_000, langs: ['kan'] },
+      // Fed into the scanner the wrong way: page 1 upside down, page 2 on its
+      // side. Both must be turned upright and read (orientation.ts), not
+      // returned as gibberish.
+      {
+        file: 'sample-scanned-turned.pdf',
+        expect: [
+          /## Page 1\s+Quarterly Operations Report/i,
+          /## Page 2\s+Quarterly Operations Report/i,
+          /fourteen percent[\s\S]*fourteen percent/i,
+          /Page 1 was upside down; Page 2 was on its side in the scan/
+        ],
+        ms: 240_000
+      }
     ]
     for (const { file, expect, ms, langs, keep } of ocrCases) {
       mark(`offline OCR ${file}`)

@@ -95,4 +95,11 @@ from PIL import Image
 page = Image.open("ocr-sample.png").convert("RGB")
 page.save("sample-scanned.pdf", save_all=True, append_images=[page.copy()], resolution=150)
 
+# The same two pages fed into the scanner the wrong way: the first upside
+# down, the second on its side (turned a quarter clockwise). Offline OCR read
+# pages like these as gibberish until it learnt to turn them upright first.
+page.rotate(180, expand=True).save(
+    "sample-scanned-turned.pdf", save_all=True, append_images=[page.rotate(-90, expand=True)], resolution=150
+)
+
 print("done:", sorted(os.listdir(".")))
