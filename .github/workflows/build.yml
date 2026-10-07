@@ -40,6 +40,11 @@ jobs:
           python -m pip install --quiet python-docx openpyxl reportlab python-pptx pillow
           python samples/make.py
 
+      - name: Security audit gate
+        # Fails on any high or critical advisory not listed, with a reason and
+        # a review date, in audit-allowlist.json (scripts/audit-gate.mjs).
+        run: npm run audit:gate
+
       - name: Type check
         run: npm run typecheck
 
@@ -94,6 +99,19 @@ jobs:
 
       - name: Build installer (NSIS)
         run: npx electron-builder --win nsis --x64 --arm64 --publish never
+
+      - name: Check the fuses
+        # The packaged executable must carry the fuses set in
+        # electron-builder.yml. Read back from the built file, so a packaging
+        # change that silently drops them fails here, not in users' hands.
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem release -Recurse -Filter 'Suprasuta Markdown Notes.exe' | Where-Object { $_.DirectoryName -match 'unpacked' } | Select-Object -First 1
+          $out = npx --yes @electron/fuses read --app $exe.FullName | Out-String
+          Write-Output $out
+          $want = 'RunAsNode is Disabled','EnableNodeOptionsEnvironmentVariable is Disabled','EnableNodeCliInspectArguments is Disabled','OnlyLoadAppFromAsar is Enabled','EnableCookieEncryption is Enabled','GrantFileProtocolExtraPrivileges is Disabled','EnableEmbeddedAsarIntegrityValidation is Enabled'
+          $missing = $want | Where-Object { $out -notmatch [regex]::Escape($_) }
+          if ($missing) { Write-Error ("Fuses not as configured: " + ($missing -join '; ')); exit 1 }
 
       - name: Build Store package (MSIX/AppX)
         # Not signed on purpose: Microsoft re-signs Store submissions during

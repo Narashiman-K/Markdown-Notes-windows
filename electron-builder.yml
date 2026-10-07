@@ -33,17 +33,21 @@ electronLanguages: [en-US]
 #                              loose app/ folder dropped beside it.
 #   enableCookieEncryption     cookies on disk are encrypted with the user's
 #                              Windows keys.
-# Left at Electron's defaults for now, to revisit in Phase 4:
-#   enableEmbeddedAsarIntegrityValidation  still experimental outside macOS.
-#   grantFileProtocolExtraPrivileges       the app's pages load from file://
-#                              today; turning this off first needs them served
-#                              from a private protocol instead.
+#   grantFileProtocolExtraPrivileges  off: file:// pages get no more than a
+#                              browser gives them. The app's own pages are
+#                              served from suprasuta://app/ (Phase 4), so
+#                              nothing of its own relies on file://.
+#   enableEmbeddedAsarIntegrityValidation  on: app.asar is checked against a
+#                              hash embedded at packaging time, and the app
+#                              refuses to start if it has been altered.
 electronFuses:
   runAsNode: false
   enableNodeOptionsEnvironmentVariable: false
   enableNodeCliInspectArguments: false
   onlyLoadAppFromAsar: true
   enableCookieEncryption: true
+  grantFileProtocolExtraPrivileges: false
+  enableEmbeddedAsarIntegrityValidation: true
 
 
 fileAssociations:

@@ -1,5 +1,5 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, nativeTheme, protocol, net, type IpcMainInvokeEvent } from 'electron'
-import { join, basename, dirname, extname, isAbsolute } from 'node:path'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeTheme, protocol, net, session, type IpcMainInvokeEvent } from 'electron'
+import { join, basename, dirname, extname, isAbsolute, normalize, sep } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { promises as fsp, watch as fsWatch, existsSync, rmSync, type FSWatcher } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -12,6 +12,9 @@ import { NATIVE_EXTS, TEXT_EXTS, DOCUMENT_EXTS, IMAGE_EXTS, CONVERTIBLE_EXTS, is
 import { APP_ASCII_NAME, APP_DISPLAY_NAME, APP_ID, STORE_REVIEW_URL } from '../shared/brand'
 
 const isDev = !app.isPackaged
+/** Where the app's own pages are served from in a built app (registerAppProtocol). */
+const APP_SCHEME = 'suprasuta'
+const APP_HOST = 'app'
 let mainWindow: BrowserWindow | null = null
 let watcher: FSWatcher | null = null
 let pendingOpenPath: string | null = null
@@ -39,7 +42,10 @@ const READABLE_EXTS = TEXT_EXTS
  * runs at module load rather than inside whenReady.
  */
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'mn-local', privileges: { standard: true, secure: true, stream: true } }
+  { scheme: 'mn-local', privileges: { standard: true, secure: true, stream: true } },
+  // The app's own pages (see registerAppProtocol). Fetch, because pdf.js,
+  // Tesseract and the spreadsheet worker load their files with it.
+  { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, codeCache: true } }
 ])
 
 /**
@@ -85,6 +91,53 @@ function extOf(p: string): string {
   return m ? m[1].toLowerCase() : ''
 }
 
+/*
+ * The app's own pages, served from `suprasuta://app/` instead of `file://`.
+ *
+ * A page on `file://` is treated by Chromium as able to reach other local
+ * files, which is why Phase 2 had to leave the grantFileProtocolExtraPrivileges
+ * fuse on. Served from a scheme of its own, the page has an ordinary origin:
+ * its CSP's 'self' means this app's files and nothing else on disk, and the
+ * fuse can go off. The handler serves only files inside the built renderer
+ * folder; anything that resolves outside it is refused, however the path is
+ * written.
+ */
+function registerAppProtocol(): void {
+  const root = normalize(join(__dirname, '../renderer'))
+  protocol.handle(APP_SCHEME, async (request) => {
+    try {
+      const url = new URL(request.url)
+      if (url.host !== APP_HOST) return new Response('Not found.', { status: 404 })
+      const target = normalize(join(root, decodeURIComponent(url.pathname)))
+      if (target !== root && !target.startsWith(root + sep)) return new Response('Forbidden.', { status: 403 })
+      return await net.fetch(pathToFileURL(target).toString())
+    } catch {
+      return new Response('Not found.', { status: 404 })
+    }
+  })
+}
+
+/*
+ * Rules for every window and frame the app creates, including the hidden
+ * ones used for printing:
+ *  - no <webview>: nothing in the app uses one, and it would be a way to load
+ *    a page with its own preferences;
+ *  - permissions (camera, microphone, location, notifications, MIDI…) are
+ *    refused; the app needs none. Writing to the clipboard and going full
+ *    screen are the only ones allowed.
+ */
+const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen'])
+
+function hardenSessions(): void {
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) =>
+    callback(ALLOWED_PERMISSIONS.has(permission))
+  )
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission))
+  app.on('web-contents-created', (_e, contents) => {
+    contents.on('will-attach-webview', (event) => event.preventDefault())
+  })
+}
+
 /* ------------------------------------------------------------------ window */
 
 function createWindow(): void {
@@ -110,7 +163,10 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      // Chromium's sandbox around the page. The preload uses only the parts
+      // of Electron a sandboxed preload may (contextBridge, ipcRenderer,
+      // webUtils); everything touching the disk is in this process.
+      sandbox: true,
       spellcheck: true
     }
   })
@@ -156,12 +212,30 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // Block in-page navigation (drag & drop of files onto the window, stray links)
-  mainWindow.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith('http://localhost') && !url.startsWith('file://')) {
-      e.preventDefault()
-      if (/^https?:/i.test(url)) shell.openExternal(url)
+  /*
+   * The window only ever shows the app itself. Any other navigation (a link
+   * clicked in a document, a file dropped on the window) is stopped; web
+   * links open in the browser instead. This used to let through every
+   * `file://` URL and every `http://localhost` address, so a link could
+   * replace the app with a local page that then had the app's preload.
+   */
+  const devUrl = process.env['ELECTRON_RENDERER_URL']
+  const home = isDev && devUrl ? new URL(devUrl) : new URL(`${APP_SCHEME}://${APP_HOST}/`)
+  const isHome = (url: string): boolean => {
+    try {
+      const u = new URL(url)
+      return u.protocol === home.protocol && u.host === home.host
+    } catch {
+      return false
     }
+  }
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (isHome(url)) return
+    e.preventDefault()
+    if (/^https?:/i.test(url)) shell.openExternal(url)
+  })
+  mainWindow.webContents.on('will-redirect', (e, url) => {
+    if (!isHome(url)) e.preventDefault()
   })
 
   mainWindow.on('close', (e) => {
@@ -188,11 +262,10 @@ function createWindow(): void {
     stopWatching()
   })
 
-  const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
     mainWindow.loadURL(devUrl)
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.loadURL(`${APP_SCHEME}://${APP_HOST}/index.html`)
   }
 
   buildMenu(mainWindow, (action, payload) => mainWindow?.webContents.send('menu:action', { action, payload }))
@@ -856,6 +929,8 @@ if (!gotLock) {
     // so no tool trips over a Unicode path.
     if (!harness) app.setPath('userData', join(app.getPath('appData'), APP_ASCII_NAME))
     registerLocalImageProtocol()
+    registerAppProtocol()
+    hardenSessions()
     registerIpc()
     pendingOpenPath = fileFromArgv(process.argv)
     createWindow()

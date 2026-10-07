@@ -460,17 +460,24 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
     {
       const printer = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
       try {
+        // From a file on disk with a local picture, as print preview does, so a
+        // regression in what file:// pages may load shows up here too.
+        const picture = pathToFileURL(join(samples, 'ocr-sample.png')).href
         const html =
           '<!doctype html><html><head><style>@page { size: 792pt 612pt; margin: 18mm 16mm; }' +
           ' .mn-page-break { break-before: page; }</style></head><body>' +
-          '<p>First page.</p><div class="mn-page-break"></div><p>Second page.</p></body></html>'
-        await printer.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+          `<p>First page.</p><img src="${picture}" width="300"><div class="mn-page-break"></div><p>Second page.</p></body></html>`
+        const page = join(outDir, 'print-check.html')
+        writeFileSync(page, html, 'utf8')
+        await printer.loadFile(page)
+        await wait(300)
         const pdf = await printer.webContents.printToPDF({ printBackground: true, pageSize: 'A4', preferCSSPageSize: true })
         const text = pdf.toString('latin1')
         const pages = (text.match(/\/Type\s*\/Page[^s]/g) ?? []).length
         const box = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(text)
         const size = box ? `${Math.round(Number(box[1]))}x${Math.round(Number(box[2]))}` : 'none'
         check('print keeps the page break and the original page size', pages === 2 && size === '792x612', `${pages} pages, ${size}`)
+        check('a local picture prints', /\/Subtype\s*\/Image/.test(text), /\/Subtype\s*\/Image/.test(text) ? 'image in PDF' : 'no image')
       } finally {
         printer.destroy()
       }
@@ -496,6 +503,33 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       )
       win.webContents.off('console-message', listen)
       check('pdf.js reads in its own worker', seen.length === 0, seen.join(' | ') || 'no fallback')
+    }
+
+    /*
+     * 13e — Phase 4 hardening: the app is served from its own scheme, has no
+     * Node.js in the page, refuses web permissions, and the window cannot be navigated
+     * away to a local file.
+     */
+    mark('security')
+    {
+      const info = JSON.parse(
+        await js<string>(`(async () => JSON.stringify({
+          origin: location.protocol + '//' + location.host,
+          node: typeof require !== 'undefined' || typeof process !== 'undefined',
+          notify: await Notification.requestPermission(),
+          camera: await navigator.permissions.query({ name: 'camera' }).then((p) => p.state).catch((e) => 'error ' + e)
+        }))()`)
+      ) as { origin: string; node: boolean; notify: string; camera: string }
+      check('pages come from the app scheme, not file://', info.origin === 'suprasuta://app', info.origin)
+      check('no Node.js in the page', info.node === false, String(info.node))
+      check('web permissions are refused', info.notify === 'denied' && info.camera !== 'granted', `${info.notify}, camera ${info.camera}`)
+
+      const before = win.webContents.getURL()
+      const target = pathToFileURL(join(samples, 'sample.txt')).href
+      await js<boolean>(`(() => { location.href = ${JSON.stringify(target)}; return true })()`)
+      await wait(800)
+      const after = win.webContents.getURL()
+      check('navigating to a local file is refused', after === before, after)
     }
 
     mark('spreadsheet worker')
