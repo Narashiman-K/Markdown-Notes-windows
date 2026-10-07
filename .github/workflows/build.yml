@@ -52,7 +52,13 @@ jobs:
         run: npm test
 
       - name: Build
-        run: npx electron-vite build
+        # npx bypasses npm scripts, so the prebuild hook that stages the
+        # offline OCR engine and language models does not fire. Without this
+        # the app builds, but offline OCR has nothing to load: the smoke test
+        # failed on it, and packages built here would have shipped without it.
+        run: |
+          node scripts/tesseract-assets.mjs
+          npx electron-vite build
 
       - name: End-to-end smoke test
         run: npm run smoke
@@ -95,7 +101,13 @@ jobs:
           NODE_ENV: development
 
       - name: Build
-        run: npx electron-vite build
+        # npx bypasses npm scripts, so the prebuild hook that stages the
+        # offline OCR engine and language models does not fire. Without this
+        # the app builds, but offline OCR has nothing to load: the smoke test
+        # failed on it, and packages built here would have shipped without it.
+        run: |
+          node scripts/tesseract-assets.mjs
+          npx electron-vite build
 
       - name: Build installer (NSIS)
         run: npx electron-builder --win nsis --x64 --arm64 --publish never
