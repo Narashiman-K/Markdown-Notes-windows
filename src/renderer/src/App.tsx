@@ -159,6 +159,11 @@ export default function App(): React.JSX.Element {
   // not have to tick Kannada every time.
   const [ocrLanguages, setOcrLanguages] = useState<string[]>(['eng'])
   const [keepPageImages, setKeepPageImages] = useState(false)
+  const [pdfImages, setPdfImages] = useState(true)
+  const changePdfImages = useCallback((on: boolean) => {
+    setPdfImages(on)
+    void window.api.setSettings({ pdfImages: on })
+  }, [])
   /** File menu: where a .md opened from Explorer goes (main/index.ts chooseWhereToOpen). */
   const [openMode, setOpenMode] = useState<'ask' | 'new' | 'here'>('ask')
   const changeKeepPageImages = useCallback((keep: boolean) => {
@@ -1181,6 +1186,7 @@ export default function App(): React.JSX.Element {
       setKeepPageImages(s?.keepPageImages === true)
       if (s?.openFromExplorer) setOpenMode(s.openFromExplorer)
       if (typeof s?.autosave === 'boolean') setAutosave(s.autosave)
+      if (typeof s?.pdfImages === 'boolean') setPdfImages(s.pdfImages)
       void window.api.cloudFolders().then(setCloudFolders)
       if (s?.reader) setReader({ ...DEFAULT_READER, ...(s.reader as Partial<ReaderSettings>) })
     })
@@ -1585,6 +1591,8 @@ export default function App(): React.JSX.Element {
           onOcrLanguagesChange={changeOcrLanguages}
           keepPageImages={keepPageImages}
           onKeepPageImagesChange={changeKeepPageImages}
+          pdfImages={pdfImages}
+          onPdfImagesChange={changePdfImages}
           initialFiles={convertSeed}
           onClose={() => setConvertSeed(null)}
           onToast={flash}

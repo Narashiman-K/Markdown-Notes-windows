@@ -102,4 +102,23 @@ page.rotate(180, expand=True).save(
     "sample-scanned-turned.pdf", save_all=True, append_images=[page.rotate(-90, expand=True)], resolution=150
 )
 
+
+# ---- Text PDF with a picture between two paragraphs, and a small logo on
+# every page (a header the converter should leave out). Built from
+# ocr-sample.png so the picture is a real raster image.
+from reportlab.lib.utils import ImageReader
+pic = ImageReader("ocr-sample.png")
+c = canvas.Canvas("sample-pictures.pdf", pagesize=A4)
+w, h = A4
+for page in (1, 2, 3):
+    c.drawImage(pic, w - 110, h - 60, width=80, height=40)          # header logo
+    c.setFont("Helvetica-Bold", 18); c.drawString(72, h - 110, f"Picture test page {page}")
+    c.setFont("Helvetica", 11)
+    c.drawString(72, h - 150, f"The paragraph above the chart on page {page}.")
+    if page == 1:
+        c.drawImage(pic, 72, h - 420, width=300, height=186)       # the picture
+    c.drawString(72, h - 460, f"The paragraph below the chart on page {page}.")
+    c.showPage()
+c.save()
+
 print("done:", sorted(os.listdir(".")))

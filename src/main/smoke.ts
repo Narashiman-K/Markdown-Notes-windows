@@ -555,6 +555,25 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       }
     }
 
+    /*
+     * 13g — pictures in a PDF with text: the chart lands between the
+     * paragraphs above and below it, and the logo repeated at the top of
+     * every page is left out.
+     */
+    mark('pictures from a text PDF')
+    {
+      const pdf = join(samples, 'sample-pictures.pdf').replace(/\\/g, '\\\\')
+      const raw = await jsWithTimeout<string>(
+        `(async () => { const r = await window.api.readBytes("${pdf}"); const c = await window.__convert.convertToMarkdown(new Uint8Array(r.bytes), "sample-pictures.pdf", {}); return JSON.stringify({ ok: c.ok, md: (c.markdown || '').replace(/data:image\\/jpeg;base64,[A-Za-z0-9+/=]+/g, 'DATA') }) })()`,
+        60_000,
+        JSON.stringify({ ok: false, md: 'timed out' })
+      )
+      const got = JSON.parse(raw) as { ok: boolean; md: string }
+      const pictures = (got.md.match(/!\[Picture \d+\]\(DATA\)/g) ?? []).length
+      const between = /above the chart on page 1\.\s+!\[Picture 1\]\(DATA\)\s+The paragraph below the chart on page 1/.test(got.md)
+      check('a text PDF keeps its picture, in place, without the repeated logo', got.ok && pictures === 1 && between, `${pictures} picture(s), in place: ${between}`)
+    }
+
     mark('spreadsheet worker')
     const xlsxPath = join(samples, 'sample.xlsx').replace(/\\/g, '\\\\')
     const sheetRaw = await jsWithTimeout<string>(

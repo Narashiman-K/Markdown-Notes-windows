@@ -47,6 +47,8 @@ export interface Settings {
   openFromExplorer: 'ask' | 'new' | 'here'
   /** Save into the file every 30 s while there are changes (recovery copy when there is no file). */
   autosave: boolean
+  /** Text PDFs: take their pictures out too. */
+  pdfImages: boolean
   /** Synced folders added by hand (File > Add a cloud folder…); the usual ones are found (cloud-folders.ts). */
   cloudFolders?: Array<{ label: string; path: string }>
 }
@@ -68,7 +70,8 @@ const DEFAULTS: Settings = {
   ocrLanguages: ['eng'],
   keepPageImages: false,
   openFromExplorer: 'ask',
-  autosave: true
+  autosave: true,
+  pdfImages: true
 }
 
 let cache: Settings | null = null
