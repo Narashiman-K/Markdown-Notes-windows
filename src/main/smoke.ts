@@ -589,6 +589,23 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       check(`${file} keeps its pictures in place`, expect.test(raw), raw.replace(/\s+/g, ' ').slice(0, 140))
     }
 
+    // An EPUB: contents and index links point inside the document, the book's
+    // picture is kept, and a link to a missing place becomes plain text.
+    {
+      const path = join(samples, 'sample-book.epub').replace(/\\/g, '\\\\')
+      const raw = await jsWithTimeout<string>(
+        `(async () => { const r = await window.api.readBytes("${path}"); const c = await window.__convert.convertToMarkdown(new Uint8Array(r.bytes), "sample-book.epub", {}); return (c.markdown || c.error || '').replace(/data:image\\/jpeg;base64,[A-Za-z0-9+/=]+/g, 'DATA') })()`,
+        60_000,
+        'timed out'
+      )
+      const ok =
+        raw.includes('[Chapter One](#epub-1)') &&
+        raw.includes('<a id="epub-1"></a>') &&
+        /!\[Sales chart\]\(DATA\)/.test(raw) &&
+        !/\]\([^)#]*\.x?html/.test(raw)
+      check('an EPUB keeps working internal links and its picture', ok, raw.replace(/\s+/g, ' ').slice(0, 140))
+    }
+
     mark('spreadsheet worker')
     const xlsxPath = join(samples, 'sample.xlsx').replace(/\\/g, '\\\\')
     const sheetRaw = await jsWithTimeout<string>(

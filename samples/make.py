@@ -144,4 +144,29 @@ s2 = prs.slides.add_slide(prs.slide_layouts[5]); s2.shapes.title.text = "Slide w
 s2.shapes.add_picture("ocr-sample.png", PInches(1), PInches(2), width=PInches(6))
 prs.save("sample-pictures.pptx")
 
+
+# ---- A realistic EPUB: XHTML chapters with self-closing page markers
+# (<a id="p2"/>, which plain HTML parsing turns into a link swallowing the
+# rest of the chapter), a contents page linking into the chapters, an index
+# linking to page markers, a footnote and a picture.
+def _book():
+    x = '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>t</title></head><body>{}</body></html>'
+    files = {
+        "OEBPS/toc.xhtml": x.format('<h1>Contents</h1><p><a href="ch1.xhtml">Chapter One</a></p><p><a href="ch2.xhtml#sec2">Chapter Two, the second section</a></p>'),
+        "OEBPS/ch1.xhtml": x.format('<h1>Chapter One</h1><p>First paragraph.<a id="p1"/> Text after the first page marker.</p><p>A note follows.<a href="ch2.xhtml#fn1" epub:type="noteref">1</a></p><p><img src="images/chart.png" alt="Sales chart"/></p><p>Last paragraph of chapter one.</p>'),
+        "OEBPS/ch2.xhtml": x.format('<h1>Chapter Two</h1><p>Opening.<a id="p2"/> More text on page two.</p><h2 id="sec2">The second section</h2><p>Section text.</p><aside id="fn1" epub:type="footnote"><p>1. The footnote text.</p></aside>'),
+        "OEBPS/index.xhtml": x.format('<h1>Index</h1><p>first page, <a href="ch1.xhtml#p1">1</a></p><p>second page, <a href="ch2.xhtml#p2">2</a></p><p>missing, <a href="gone.xhtml#x">9</a></p>'),
+    }
+    opf = ('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>The Linked Book</dc:title><dc:creator>A. Writer</dc:creator></metadata>'
+           '<manifest><item id="toc" href="toc.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="ch2.xhtml" media-type="application/xhtml+xml"/><item id="ix" href="index.xhtml" media-type="application/xhtml+xml"/><item id="img" href="images/chart.png" media-type="image/png"/></manifest>'
+           '<spine><itemref idref="toc"/><itemref idref="c1"/><itemref idref="c2"/><itemref idref="ix"/></spine></package>')
+    with zipfile.ZipFile("sample-book.epub", "w") as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr("META-INF/container.xml", '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
+        z.writestr("OEBPS/book.opf", opf)
+        for k, v in files.items():
+            z.writestr(k, v)
+        z.write("ocr-sample.png", "OEBPS/images/chart.png")
+_book()
+
 print("done:", sorted(os.listdir(".")))

@@ -1146,7 +1146,13 @@ html[data-reader] .preview-host {
 
 html[data-reader] .markdown-body {
   max-width: var(--reader-width);
-  margin: 0 auto;
+  /*
+   * Centred, but never under the controls panel on the left (it ends about
+   * 212px in): in a window that is not maximised the centred column would
+   * otherwise start beneath it and the panel would cover the first words of
+   * every line.
+   */
+  margin: 0 auto 0 max(220px, calc((100% - var(--reader-width)) / 2));
   padding: 72px 28px 45vh;
   font-size: var(--reader-size);
   line-height: var(--reader-leading);

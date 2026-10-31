@@ -167,10 +167,25 @@ const Preview = forwardRef<PreviewHandle, Props>(function Preview(props, ref) {
     function onClick(e: MouseEvent): void {
       const target = (e.target as HTMLElement).closest('[data-mn-id]') as HTMLElement | null
       props.onSelectAnnotation(target?.dataset.mnId ?? null)
+      /*
+       * Links. The written href decides, not the resolved one: a relative
+       * link such as "chapter2.xhtml" (from a converted EPUB) resolves to an
+       * http address of the app itself, and was being opened as a web page,
+       * which came up blank.
+       *   #target   scrolls to it within the document;
+       *   http(s):  and mailto: open outside the app;
+       *   anything else (a file that is not here) does nothing.
+       */
       const anchor = (e.target as HTMLElement).closest('a') as HTMLAnchorElement | null
-      if (anchor?.href && /^https?:/i.test(anchor.href)) {
+      const written = anchor?.getAttribute('href') ?? ''
+      if (anchor && written) {
         e.preventDefault()
-        window.open(anchor.href, '_blank')
+        if (written.startsWith('#')) {
+          const id = decodeURIComponent(written.slice(1))
+          hostRef.current?.querySelector(`[id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start' })
+        } else if (/^(https?:|mailto:)/i.test(written)) {
+          window.open(anchor.href, '_blank')
+        }
       }
     }
 
