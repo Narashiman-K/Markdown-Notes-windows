@@ -121,6 +121,8 @@ export default function App(): React.JSX.Element {
   const [recoveryKept, setRecoveryKept] = useState(false)
   /** This document's recovery copy; a new one for each document loaded. */
   const recoveryId = useRef<string>(crypto.randomUUID())
+  /** Whether AutoSave has already asked this document for a name (once only). */
+  const askedForName = useRef(false)
   const [mode, setMode] = useState<Mode>('view')
   const [zoom, setZoom] = useState(1)
   const [theme, setTheme] = useState<Theme>('system')
@@ -334,6 +336,7 @@ export default function App(): React.JSX.Element {
     // recovery copy goes, and the new document gets its own.
     void window.api.clearRecovery(recoveryId.current)
     recoveryId.current = crypto.randomUUID()
+    askedForName.current = false
     setAutoSavedAt(null)
     setRecoveryKept(false)
     setContent(text)
@@ -421,8 +424,8 @@ export default function App(): React.JSX.Element {
   )
 
   const doSave = useCallback(
-    async (saveAs = false, folder?: string): Promise<boolean> => {
-      const r = await window.api.saveFile({ filePath, content, saveAs, folder })
+    async (saveAs = false, folder?: string, purpose?: 'autosave'): Promise<boolean> => {
+      const r = await window.api.saveFile({ filePath, content, saveAs, folder, purpose })
       if (r.ok && r.filePath) {
         setFilePath(r.filePath)
         setDirty(false)
@@ -1059,10 +1062,25 @@ export default function App(): React.JSX.Element {
   const latest = useRef({ content, filePath, fileName, autosave })
   latest.current = { content, filePath, fileName, autosave }
   const autosaveTimer = useRef<number | null>(null)
+  const doSaveRef = useRef(doSave)
+  doSaveRef.current = doSave
 
   const runAutosave = useCallback(async () => {
     if (!dirtyRef.current) return
     const { content: text, filePath: path, fileName: name, autosave: on } = latest.current
+    /*
+     * A document with no file yet: ask for a name, once. Saved, it is kept
+     * up to date from then on like any other; cancelled, it is not asked
+     * again (that would interrupt every 30 seconds), and a recovery copy is
+     * kept instead.
+     */
+    if (on && !path && !askedForName.current) {
+      askedForName.current = true
+      if (await doSaveRef.current(true, undefined, 'autosave')) {
+        setAutoSavedAt(new Date())
+        return
+      }
+    }
     if (on && path) {
       const r = await window.api.saveFile({ filePath: path, content: text, quiet: true })
       if (r.ok) {
@@ -1314,7 +1332,9 @@ export default function App(): React.JSX.Element {
         <span title={autosave ? 'AutoSave is on (File menu)' : 'AutoSave is off (File menu)'}>
           {dirty
             ? recoveryKept
-              ? 'Unsaved changes · recovery copy kept'
+              ? filePath
+                ? 'Unsaved changes · recovery copy kept'
+                : 'Not saved yet · recovery copy kept'
               : 'Unsaved changes'
             : autoSavedAt
               ? `Saved automatically at ${autoSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`

@@ -11,7 +11,7 @@ function on<T>(channel: string, cb: Listener<T>): () => void {
 const api = {
   openDialog: (opts?: { folder?: string }) => ipcRenderer.invoke('dialog:open', opts),
   readFile: (filePath: string) => ipcRenderer.invoke('file:read', filePath),
-  saveFile: (args: { filePath: string | null; content: string; saveAs?: boolean; quiet?: boolean; folder?: string }) =>
+  saveFile: (args: { filePath: string | null; content: string; saveAs?: boolean; quiet?: boolean; folder?: string; purpose?: 'autosave' }) =>
     ipcRenderer.invoke('file:save', args),
   exportHtml: (args: { html: string; suggestedName: string }) => ipcRenderer.invoke('file:exportHtml', args),
   exportPdf: (args: { html: string; suggestedName: string }) => ipcRenderer.invoke('file:exportPdf', args),

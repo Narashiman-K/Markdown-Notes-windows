@@ -520,14 +520,22 @@ function registerIpc(): void {
     readOrOfferConversion(filePath)
   )
 
-  handle('file:save', async (_e, args: { filePath: string | null; content: string; saveAs?: boolean; quiet?: boolean; folder?: string }) => {
+  handle('file:save', async (_e, args: { filePath: string | null; content: string; saveAs?: boolean; quiet?: boolean; folder?: string; purpose?: 'autosave' }) => {
     let target = args.filePath
     // AutoSave never opens a dialog: a document with no file gets a recovery
     // copy instead (recovery:write).
     if (args.quiet && (!target || args.saveAs)) return { ok: false, canceled: true }
+    // The test harness cannot answer AutoSave's "name this document" dialog;
+    // it counts as cancelled, which exercises the recovery copy instead.
+    if (harness && args.purpose === 'autosave') return { ok: false, canceled: true }
     if (!target || args.saveAs) {
       const r = await dialog.showSaveDialog(currentWindow()!, {
-        title: args.saveAs ? 'Save a copy as' : 'Save Markdown file',
+        title:
+          args.purpose === 'autosave'
+            ? 'Name this document: AutoSave will keep it saved from now on'
+            : args.saveAs
+              ? 'Save a copy as'
+              : 'Save Markdown file',
         // "Save to OneDrive…" and the like: that folder, keeping the name.
         defaultPath:
           args.folder && existsSync(args.folder)
