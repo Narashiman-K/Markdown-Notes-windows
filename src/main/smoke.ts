@@ -574,6 +574,21 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       check('a text PDF keeps its picture, in place, without the repeated logo', got.ok && pictures === 1 && between, `${pictures} picture(s), in place: ${between}`)
     }
 
+    // Word and PowerPoint keep their pictures too; a picture inside a Word
+    // heading moves above it, so the heading stays a heading.
+    for (const [file, expect] of [
+      ['sample-pictures.docx', /!\[[^\]]*\]\(DATA\)\s+# SECTION 1 TECHNICAL[\s\S]*before the body picture\.\s+!\[[^\]]*\]\(DATA\)\s+A paragraph after/],
+      ['sample-pictures.pptx', /### Slide with a chart\s+!\[Picture 1\]\(DATA\)/]
+    ] as const) {
+      const path = join(samples, file).replace(/\\/g, '\\\\')
+      const raw = await jsWithTimeout<string>(
+        `(async () => { const r = await window.api.readBytes("${path}"); const c = await window.__convert.convertToMarkdown(new Uint8Array(r.bytes), "${file}", {}); return (c.markdown || c.error || '').replace(/data:image\\/jpeg;base64,[A-Za-z0-9+/=]+/g, 'DATA') })()`,
+        60_000,
+        'timed out'
+      )
+      check(`${file} keeps its pictures in place`, expect.test(raw), raw.replace(/\s+/g, ' ').slice(0, 140))
+    }
+
     mark('spreadsheet worker')
     const xlsxPath = join(samples, 'sample.xlsx').replace(/\\/g, '\\\\')
     const sheetRaw = await jsWithTimeout<string>(

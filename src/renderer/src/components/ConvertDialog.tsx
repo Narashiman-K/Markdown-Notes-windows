@@ -129,6 +129,7 @@ export default function ConvertDialog(props: Props): React.JSX.Element {
   const hasImages = useMemo(() => queue.some((q) => q.isImage), [queue])
   const hasAudio = useMemo(() => queue.some((q) => q.isAudio), [queue])
   const hasPdfs = useMemo(() => queue.some((q) => q.ext === 'pdf'), [queue])
+  const hasPictureDocs = useMemo(() => queue.some((q) => ['pdf', 'docx', 'pptx'].includes(q.ext)), [queue])
   /** OCR may be needed: for images always, for a PDF only if it proves to be scanned. */
   const ocrRelevant = hasImages || hasPdfs
   const doneItems = useMemo(() => queue.filter((q) => q.status === 'done'), [queue])
@@ -433,18 +434,6 @@ export default function ConvertDialog(props: Props): React.JSX.Element {
               <label className="checkline keep-pages">
                 <input
                   type="checkbox"
-                  checked={props.pdfImages}
-                  onChange={(e) => props.onPdfImagesChange(e.target.checked)}
-                />
-                <span className="small">
-                  <strong>Include pictures</strong> from PDFs with text, each placed where it sits on the page.
-                </span>
-              </label>
-            )}
-            {hasPdfs && (
-              <label className="checkline keep-pages">
-                <input
-                  type="checkbox"
                   checked={props.keepPageImages}
                   onChange={(e) => props.onKeepPageImagesChange(e.target.checked)}
                 />
@@ -472,6 +461,18 @@ export default function ConvertDialog(props: Props): React.JSX.Element {
               />
             )}
           </div>
+        )}
+        {hasPictureDocs && (
+          <label className="checkline keep-pages pictures-option">
+            <input
+              type="checkbox"
+              checked={props.pdfImages}
+              onChange={(e) => props.onPdfImagesChange(e.target.checked)}
+            />
+            <span className="small">
+              <strong>Include pictures</strong> from PDF, Word and PowerPoint files, each placed where it sits.
+            </span>
+          </label>
         )}
 
         {/* Audio: the one format with no offline option */}

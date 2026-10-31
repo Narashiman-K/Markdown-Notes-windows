@@ -1359,3 +1359,6 @@ html[data-reader] .markdown-body img { max-width: 100%; }
 /* Page view: the desk the sheets sit on. */
 .preview-scroll.page-view { background: var(--chrome); }
 .keep-pages { margin-top: 6px; }
+
+/* Convert to Markdown: "Include pictures", shown for PDF, Word and PowerPoint files. */
+.pictures-option { display: flex; margin: 10px 2px 0; }

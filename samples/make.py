@@ -121,4 +121,27 @@ for page in (1, 2, 3):
     c.showPage()
 c.save()
 
+
+# ---- Word and PowerPoint files with pictures. The Word one has a picture
+# inside a heading (as Word allows; it must move above the heading) and one
+# in the body; the PowerPoint one has a picture on its second slide.
+import docx as _docx
+from docx.shared import Inches
+from pptx import Presentation
+from pptx.util import Inches as PInches
+d = _docx.Document()
+h = d.add_heading("", level=1)
+h.add_run().add_picture("ocr-sample.png", width=Inches(1.5))
+h.add_run("SECTION 1 TECHNICAL")
+d.add_paragraph("A paragraph before the body picture.")
+d.add_picture("ocr-sample.png", width=Inches(4))
+d.add_paragraph("A paragraph after the body picture.")
+d.save("sample-pictures.docx")
+prs = Presentation()
+s1 = prs.slides.add_slide(prs.slide_layouts[1]); s1.shapes.title.text = "Slide with text only"
+s1.placeholders[1].text = "A bullet point"
+s2 = prs.slides.add_slide(prs.slide_layouts[5]); s2.shapes.title.text = "Slide with a chart"
+s2.shapes.add_picture("ocr-sample.png", PInches(1), PInches(2), width=PInches(6))
+prs.save("sample-pictures.pptx")
+
 print("done:", sorted(os.listdir(".")))
