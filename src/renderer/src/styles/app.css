@@ -1368,3 +1368,87 @@ html[data-reader] .markdown-body img { max-width: 100%; }
 
 /* Convert to Markdown: "Include pictures", shown for PDF, Word and PowerPoint files. */
 .pictures-option { display: flex; margin: 10px 2px 0; }
+
+/* ------------------------------------------------------- compare documents */
+/*
+ * Takes over the window (band 200+). Side by side is a three-column grid per
+ * row: left text, the take-across buttons, right text. Changed words carry
+ * colour AND a line style (struck through / underlined), so the marks still
+ * read in high contrast and for colour-blind readers.
+ */
+.compare-choose { width: 520px; }
+.compare-sources { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
+.compare-source {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; padding: 9px 12px; border: 1px solid var(--chrome-border); border-radius: 8px;
+  background: var(--chrome); color: var(--fg); cursor: pointer;
+}
+.compare-source:hover { border-color: var(--accent); }
+.error-text { color: #c42b1c; }
+html[data-theme='dark'] .error-text { color: #ff8a80; }
+
+.compare-view {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; flex-direction: column;
+  background: var(--bg); color: var(--fg);
+}
+.cmp-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  padding: 8px 12px; border-bottom: 1px solid var(--chrome-border); background: var(--chrome);
+}
+.cmp-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 260px; }
+.cmp-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34ch; }
+.cmp-stats, .cmp-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cmp-actions > button, .cmp-footer button {
+  padding: 4px 10px; border: 1px solid var(--chrome-border); border-radius: 6px;
+  background: var(--bg); color: var(--fg); cursor: pointer; font: inherit; font-size: 13px;
+}
+.cmp-actions > button.on, .cmp-actions > button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cmp-actions > button:disabled { opacity: 0.5; cursor: default; }
+.cmp-mini {
+  padding: 1px 7px; border: 1px solid var(--chrome-border); border-radius: 5px;
+  background: var(--bg); color: var(--fg); cursor: pointer; font-size: 12px; line-height: 1.6;
+}
+.cmp-mini:hover { border-color: var(--accent); }
+.cmp-note { padding: 5px 14px; font-size: 13px; background: var(--chrome); border-bottom: 1px solid var(--chrome-border); cursor: default; }
+
+.cmp-main { flex: 1; display: flex; min-height: 0; }
+.cmp-body { flex: 1; overflow: auto; padding: 0 0 40vh; font: 13.5px/1.55 ui-monospace, 'Cascadia Mono', Consolas, monospace; }
+.cmp-row { display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr); }
+.cmp-cell { padding: 1px 10px; white-space: pre-wrap; overflow-wrap: anywhere; border-right: 1px solid var(--rule); }
+.cmp-row .cmp-cell:last-child { border-right: 0; border-left: 1px solid var(--rule); }
+.cmp-head { position: sticky; top: 0; z-index: 1; background: var(--chrome); font: 600 12px system-ui, 'Segoe UI', sans-serif; border-bottom: 1px solid var(--chrome-border); }
+.cmp-head .cmp-cell { padding: 6px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmp-mid { display: flex; flex-direction: column; align-items: center; gap: 3px; padding-top: 3px; }
+.cmp-change { background: rgba(255, 196, 0, 0.09); border-top: 1px solid rgba(255, 170, 0, 0.35); border-bottom: 1px solid rgba(255, 170, 0, 0.35); padding: 3px 0; }
+.cmp-change.current { box-shadow: inset 4px 0 0 var(--accent); background: rgba(255, 196, 0, 0.16); }
+.cmp-change .cmp-cell > .cmp-mini { float: right; margin-left: 6px; opacity: 0.55; }
+.cmp-change:hover .cmp-cell > .cmp-mini { opacity: 1; }
+.cmp-cell.empty { background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(127, 127, 127, 0.08) 6px 12px); }
+.cmp-del { background: rgba(255, 80, 70, 0.22); color: inherit; text-decoration: line-through; text-decoration-color: rgba(200, 30, 30, 0.8); border-radius: 2px; }
+.cmp-ins { background: rgba(40, 180, 80, 0.24); color: inherit; text-decoration: underline; text-decoration-color: rgba(20, 130, 50, 0.8); text-underline-offset: 2px; border-radius: 2px; }
+.cmp-gap { text-align: center; color: var(--muted); font: italic 12px system-ui, sans-serif; padding: 3px; background: var(--chrome); cursor: pointer; border-top: 1px dashed var(--rule); border-bottom: 1px dashed var(--rule); }
+.cmp-gap:hover { color: var(--accent); }
+.cmp-inline { max-width: 980px; margin: 0 auto; padding: 10px 16px; }
+.cmp-line { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1px 8px; }
+.cmp-inline-change { position: relative; border-radius: 4px; }
+.cmp-inline-tools { float: right; display: flex; gap: 4px; padding: 2px 6px; opacity: 0.6; }
+.cmp-inline-change:hover .cmp-inline-tools { opacity: 1; }
+.cmp-flash { animation: cmp-flash 900ms ease; }
+@keyframes cmp-flash { from { background: rgba(15, 108, 189, 0.3); } }
+.cmp-edit textarea { width: 100%; box-sizing: border-box; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--accent); border-radius: 5px; padding: 4px 6px; resize: vertical; }
+.cmp-edit-actions { display: flex; gap: 6px; margin: 4px 0 2px; }
+.cmp-edit-actions button { padding: 2px 10px; font-size: 12px; border: 1px solid var(--chrome-border); border-radius: 5px; background: var(--bg); color: var(--fg); cursor: pointer; }
+.cmp-edit-actions button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.cmp-whole { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px; height: calc(100% - 10px); box-sizing: border-box; }
+.cmp-whole label { display: flex; flex-direction: column; gap: 4px; min-height: 0; font: 600 12px system-ui, sans-serif; }
+.cmp-whole textarea { flex: 1; min-height: 60vh; font: 13.5px/1.55 ui-monospace, 'Cascadia Mono', Consolas, monospace; color: var(--fg); background: var(--bg); border: 1px solid var(--chrome-border); border-radius: 6px; padding: 8px; resize: none; }
+.cmp-whole p { grid-column: 1 / -1; margin: 0; }
+.cmp-footer { display: flex; justify-content: center; gap: 10px; padding: 18px; font-family: system-ui, 'Segoe UI', sans-serif; }
+.cmp-ai { width: min(420px, 38vw); border-left: 1px solid var(--chrome-border); overflow: auto; padding: 10px 14px; background: var(--chrome); }
+.cmp-ai-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.cmp-ai-text { font-size: 14px; }
+@media (max-width: 760px) {
+  .cmp-row { grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr); }
+  .cmp-ai { position: absolute; right: 0; top: 0; bottom: 0; width: 88vw; z-index: 2; }
+}

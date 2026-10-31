@@ -105,6 +105,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
         { separator: true, label: '' },
         { label: 'Convert to Markdown…', action: 'convert:open', accelerator: 'Ctrl+Shift+M' },
         { label: 'Merge files…', action: 'file:merge' },
+        { label: 'Compare documents…', action: 'file:compare' },
         { label: 'Converter settings…', action: 'convert:settings' },
         { separator: true, label: '' },
         { label: 'Print…', action: 'file:print', accelerator: 'Ctrl+P' },
@@ -233,7 +234,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
          * `ai:quick:*` opens the panel and runs the matching action.
          */
         { label: 'Summarise', action: 'ai:quick:summarise' },
-        { label: 'Compare documents', action: 'ai:quick:compare' },
+        { label: 'Compare loaded documents (AI)', action: 'ai:quick:compare' },
         { label: 'Explain selection', action: 'ai:quick:explain' },
         { label: 'Suggest annotations', action: 'ai:quick:annotate' }
       ]

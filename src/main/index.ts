@@ -1104,6 +1104,46 @@ function registerIpc(): void {
     createWindow()
     return true
   })
+
+  /*
+   * Compare documents with another window. The asking window gets the other
+   * windows' document names, then one document's text, and can send edited
+   * text back, which lands there as an undoable change. The page side is
+   * window.__mnCompare, set up by App.tsx; content travels as a JSON literal,
+   * so no text from a document is ever run as code.
+   */
+  const otherWindow = (id: number): BrowserWindow | null => {
+    const me = senderWindow.getStore()
+    const w = [...windows].find((x) => x.id === id && x !== me)
+    return w && !w.isDestroyed() ? w : null
+  }
+  handle('compare:windows', async () => {
+    const me = senderWindow.getStore()
+    const out: Array<{ id: number; name: string }> = []
+    for (const w of windows) {
+      if (w === me || w.isDestroyed()) continue
+      const doc = (await w.webContents.executeJavaScript('window.__mnCompare ? window.__mnCompare.get() : null').catch(() => null)) as {
+        name: string
+      } | null
+      if (doc) out.push({ id: w.id, name: doc.name })
+    }
+    return out
+  })
+  handle('compare:windowText', async (_e, id: number) => {
+    const w = otherWindow(id)
+    if (!w) return null
+    return (await w.webContents.executeJavaScript('window.__mnCompare ? window.__mnCompare.get() : null').catch(() => null)) as {
+      name: string
+      content: string
+    } | null
+  })
+  handle('compare:setWindowText', async (_e, args: { id: number; content: string }) => {
+    const w = otherWindow(args.id)
+    if (!w || typeof args.content !== 'string') return false
+    return (await w.webContents
+      .executeJavaScript(`window.__mnCompare ? window.__mnCompare.set(${JSON.stringify(args.content)}) : false`)
+      .catch(() => false)) === true
+  })
 }
 
 /* ------------------------------------------------------------- app lifecycle */

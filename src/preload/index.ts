@@ -93,6 +93,9 @@ const api = {
   forceClose: () => ipcRenderer.invoke('app:forceClose'),
   /** File > New window: another document window. */
   newWindow: () => ipcRenderer.invoke('app:newWindow'),
+  compareWindows: (): Promise<Array<{ id: number; name: string }>> => ipcRenderer.invoke('compare:windows'),
+  compareWindowText: (id: number): Promise<{ name: string; content: string } | null> => ipcRenderer.invoke('compare:windowText', id),
+  compareSetWindowText: (args: { id: number; content: string }): Promise<boolean> => ipcRenderer.invoke('compare:setWindowText', args),
   /** Synced cloud folders on this PC (main/cloud-folders.ts). */
   cloudFolders: (): Promise<Array<{ provider: string; label: string; path: string }>> => ipcRenderer.invoke('cloud:folders'),
   addCloudFolder: (): Promise<{ ok: boolean; folders?: Array<{ provider: string; label: string; path: string }> }> =>

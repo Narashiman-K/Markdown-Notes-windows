@@ -46,6 +46,8 @@ import { DEFAULT_BLOCK_TINTS, type BlockKind } from './lib/blockTints'
 import { linkScrollers, previewScrollTarget, type ScrollSyncTarget } from './lib/syncScroll'
 import LivePreview, { type PreviewFormat } from './components/LivePreview'
 import ReaderControls from './components/ReaderControls'
+import CompareView, { type CompareSource } from './components/CompareView'
+import { convertToMarkdown as convertForCompare } from './lib/convert'
 import MenuBar from './components/MenuBar'
 import {
   applyReaderVariables,
@@ -145,6 +147,7 @@ export default function App(): React.JSX.Element {
   const [showAbout, setShowAbout] = useState(false)
   const [convertSeed, setConvertSeed] = useState<string[] | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
+  const [compareOpen, setCompareOpen] = useState(false)
   const [appDragging, setAppDragging] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
   // A quick action chosen from the AI menu, waiting for the panel to pick it
@@ -313,6 +316,103 @@ export default function App(): React.JSX.Element {
     },
     []
   )
+
+  /*
+   * Compare documents: another window can read this one's document and save
+   * changes into it (undoable here), through the main process
+   * (compare:windowText / compare:setWindowText). The ref keeps the answer
+   * current without re-registering on every keystroke.
+   */
+  const compareDocRef = useRef({ name: 'Untitled', content: '' })
+  compareDocRef.current = { name: fileName, content }
+  useEffect(() => {
+    const w = window as unknown as { __mnCompare?: { get: () => { name: string; content: string }; set: (t: string) => boolean } }
+    w.__mnCompare = {
+      get: () => compareDocRef.current,
+      set: (text: string) => {
+        commitContent(text, 'Changes from Compare documents')
+        return true
+      }
+    }
+    return () => {
+      delete w.__mnCompare
+    }
+  }, [commitContent])
+
+  /** Where the other side of a comparison can come from, in the Windows app. */
+  const compareSources = useCallback(async (): Promise<CompareSource[]> => {
+    const TEXT = ['md', 'markdown', 'mdown', 'mkd', 'mdx', 'txt', 'text']
+    const list: CompareSource[] = [
+      {
+        id: 'file',
+        label: 'Another file…',
+        detail: 'Markdown or text, or Word, PDF, PowerPoint, EPUB… (converted first, on this PC)',
+        load: async () => {
+          const r = await window.api.convertPickInput()
+          const path: string | undefined = r.ok ? r.filePaths?.[0] : undefined
+          if (!path) return null
+          const name: string = await window.api.basename(path)
+          const b = await window.api.readBytes(path)
+          if (!b.ok) throw new Error(b.error ?? `Could not read ${name}.`)
+          const bytes = new Uint8Array(b.bytes)
+          const ext = name.split('.').pop()?.toLowerCase() ?? ''
+          const isText = TEXT.includes(ext)
+          let text: string
+          if (isText) text = new TextDecoder('utf-8').decode(bytes)
+          else {
+            const c = await convertForCompare(bytes, name, { ocrMode: 'offline', ocrLanguages, keepPageImages })
+            if (!c.ok) throw new Error(c.error || `Could not read ${name}.`)
+            text = c.markdown
+          }
+          return {
+            name,
+            text,
+            // A text file is saved where it is; anything converted is saved as
+            // a new Markdown file, never over the original Word or PDF.
+            saveLabel: isText ? `Save ${name}` : 'Save as Markdown…',
+            save: async (t: string) => {
+              const w = isText
+                ? await window.api.writeText({ filePath: path, text: t })
+                : await window.api.exportText({ text: t, suggestedName: name.replace(/\.[^.]+$/, '') + '.md', title: 'Save the compared document' })
+              return w.ok || w.canceled ? null : (w.error ?? 'Could not save.')
+            }
+          }
+        }
+      }
+    ]
+    const path = filePath
+    if (path) {
+      list.push({
+        id: 'saved',
+        label: 'The saved version of this document',
+        detail: 'What you changed since it was last saved',
+        load: async () => {
+          const r = await window.api.readFile(path)
+          if (!r?.ok || typeof r.content !== 'string') throw new Error(r?.error ?? 'Could not read the saved file.')
+          return { name: `${fileName} (saved)`, text: r.content }
+        }
+      })
+    }
+    for (const w of await window.api.compareWindows().catch(() => [])) {
+      list.push({
+        id: `win:${w.id}`,
+        label: w.name,
+        detail: 'Open in another window',
+        load: async () => {
+          const got = await window.api.compareWindowText(w.id)
+          if (!got) throw new Error('That window did not answer. It may have been closed.')
+          return {
+            name: got.name,
+            text: got.content,
+            saveLabel: 'Update that window',
+            save: async (t: string) =>
+              (await window.api.compareSetWindowText({ id: w.id, content: t })) ? null : 'That window did not answer. It may have been closed.'
+          }
+        }
+      })
+    }
+    return list
+  }, [filePath, fileName, ocrLanguages, keepPageImages])
 
   const doUndo = useCallback(() => {
     // In edit mode the source editor owns undo, so keystroke-level history
@@ -751,6 +851,9 @@ export default function App(): React.JSX.Element {
           return
         case 'convert:open':
           setConvertSeed([])
+          return
+        case 'file:compare':
+          setCompareOpen(true)
           return
         case 'file:merge':
           setMergeOpen(true)
@@ -1545,6 +1648,32 @@ export default function App(): React.JSX.Element {
             setPendingDiff(null)
             flash(`${pendingDiff.label} applied. Ctrl+Z to undo.`)
           }}
+        />
+      )}
+
+      {compareOpen && (
+        <CompareView
+          leftName={fileName}
+          leftText={content}
+          onLeftChange={(text, label) => commitContent(text, label)}
+          listSources={compareSources}
+          ask={async (system, user) => {
+            const s = await window.api.getSettings()
+            const provider = s?.aiProvider ?? 'ollama'
+            let model: string = s?.aiModel ?? ''
+            if (!model) model = (await window.api.aiModels(provider))?.models?.[0] ?? ''
+            return window.api.aiChat({ provider, model, system, messages: [{ role: 'user', content: user }], temperature: 0.2, maxTokens: 1500 })
+          }}
+          exportReport={async (name, data, kind) => {
+            const r =
+              kind === 'html'
+                ? await window.api.exportHtml({ html: data, suggestedName: name })
+                : await window.api.exportText({ text: data, suggestedName: name, title: 'Export the comparison' })
+            if (r?.ok) flash(`Saved ${r.filePath ?? name}.`)
+            else if (r && !r.canceled) flash(r.error ?? 'Could not export.')
+          }}
+          confirm={(title, message) => window.api.confirm({ title, message })}
+          onClose={() => setCompareOpen(false)}
         />
       )}
 

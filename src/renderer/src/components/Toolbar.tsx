@@ -36,6 +36,7 @@ export default function Toolbar(props: Props): React.JSX.Element {
           what it does where a symbol would have to be learned. */}
       <div className="tb-group">
         {btn('file:merge', '⧉ Merge docs', 'Merge files: combine several documents into one', 'tb-text')}
+        {btn('file:compare', '⇆ Compare', 'Compare documents: see every difference side by side', 'tb-text')}
         {props.scans && props.scans !== 'none' &&
           btn(
             'view:scans',

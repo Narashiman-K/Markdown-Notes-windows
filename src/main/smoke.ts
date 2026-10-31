@@ -606,6 +606,18 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       check('an EPUB keeps working internal links and its picture', ok, raw.replace(/\s+/g, ' ').slice(0, 140))
     }
 
+    // Compare documents: this window answers for its document, and the list
+    // of other windows comes back (empty here: only one window is open).
+    {
+      const raw = await jsWithTimeout<string>(
+        `(async () => JSON.stringify({ doc: typeof window.__mnCompare?.get().content, others: await window.api.compareWindows() }))()`,
+        10_000,
+        '{}'
+      )
+      const got = JSON.parse(raw) as { doc?: string; others?: unknown[] }
+      check('compare documents: the window shares its document and lists the others', got.doc === 'string' && Array.isArray(got.others), raw)
+    }
+
     mark('spreadsheet worker')
     const xlsxPath = join(samples, 'sample.xlsx').replace(/\\/g, '\\\\')
     const sheetRaw = await jsWithTimeout<string>(
