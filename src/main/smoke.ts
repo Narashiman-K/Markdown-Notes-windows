@@ -727,6 +727,13 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       const mode = await js<string>(`document.querySelector('.statusbar')?.textContent || ''`)
       check('still in Edit mode after the save', /Edit mode/.test(mode), mode.slice(0, 30))
 
+      // Another program (the web app, another editor) changes the file while
+      // this window has nothing unsaved: the window picks the change up.
+      await fsp.writeFile(doc, '# AutoSave check\n\nChanged by another program.\n', 'utf8')
+      await wait(2000)
+      const shown = await js<string>(`document.querySelector('.cm-content')?.textContent || ''`)
+      check('a change made by another program is picked up', shown.includes('Changed by another program.'), shown.slice(0, 80))
+
       win.webContents.send('menu:action', { action: 'file:new' })
       await wait(1200)
       await js<boolean>(`(() => { const c = document.querySelector('.cm-content'); c?.focus(); return !!c })()`)

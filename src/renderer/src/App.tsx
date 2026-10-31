@@ -121,6 +121,8 @@ export default function App(): React.JSX.Element {
   const [recoveryKept, setRecoveryKept] = useState(false)
   /** This document's recovery copy; a new one for each document loaded. */
   const recoveryId = useRef<string>(crypto.randomUUID())
+  /** A "changed elsewhere" question is open: AutoSave waits for the answer. */
+  const conflictOpen = useRef(false)
   /** Whether AutoSave has already asked this document for a name (once only). */
   const askedForName = useRef(false)
   const [mode, setMode] = useState<Mode>('view')
@@ -996,14 +998,36 @@ export default function App(): React.JSX.Element {
     })
     const offDisk = window.api.onFileChangedOnDisk(({ filePath: p }) => {
       void (async () => {
-        if (dirtyRef.current) return
+        if (conflictOpen.current) return
         const r = await window.api.readFile(p)
         // The app's own save (AutoSave every 30 s) also fires this; nothing
         // changed, so there is nothing to reload or announce.
-        if (r.ok && typeof r.content === 'string' && r.content !== latest.current.content) {
-          setContent(r.content)
-          flash('Reloaded — file changed on disk.')
+        if (!r.ok || typeof r.content !== 'string' || r.content === latest.current.content) return
+        /*
+         * Changed by another program (the web app, another window, another
+         * editor) while there are unsaved changes here. This used to be
+         * ignored, and AutoSave then overwrote the other version within 30
+         * seconds. The user chooses; AutoSave waits for the answer.
+         */
+        if (dirtyRef.current) {
+          conflictOpen.current = true
+          const loadTheirs = await window.api.confirm({
+            title: 'File changed elsewhere',
+            message: `“${latest.current.fileName}” was changed by another program while you have unsaved changes here.`,
+            detail:
+              'Yes: load the changed file (your unsaved changes here are discarded).\n' +
+              'No: keep your version here (saving it will replace the other one).'
+          })
+          conflictOpen.current = false
+          if (loadTheirs) {
+            setContent(r.content)
+            setDirty(false)
+            flash('Loaded the version changed outside this window.')
+          }
+          return
         }
+        setContent(r.content)
+        flash('Updated: the file was changed outside this window.')
       })()
     })
 
@@ -1066,7 +1090,7 @@ export default function App(): React.JSX.Element {
   doSaveRef.current = doSave
 
   const runAutosave = useCallback(async () => {
-    if (!dirtyRef.current) return
+    if (!dirtyRef.current || conflictOpen.current) return
     const { content: text, filePath: path, fileName: name, autosave: on } = latest.current
     /*
      * A document with no file yet: ask for a name, once. Saved, it is kept
