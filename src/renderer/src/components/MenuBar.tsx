@@ -46,6 +46,8 @@ interface Props {
   scansShown?: boolean
   /** Ticks the File menu's choice for files opened from Explorer. */
   openMode?: OpenMode
+  /** Ticks File > AutoSave. */
+  autosave?: boolean
 }
 
 type OpenMode = 'ask' | 'new' | 'here'
@@ -57,7 +59,7 @@ const dirname = (p: string): string => {
   return parts.join('\\') || p
 }
 
-function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, scansShown: boolean, openMode: OpenMode): Menu[] {
+function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, scansShown: boolean, openMode: OpenMode, autosave: boolean): Menu[] {
   /*
    * Recent files are listed inline rather than in a submenu. The native menu
    * nested them, but one level of nesting for a list this short buys nothing
@@ -91,6 +93,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
         { separator: true, label: '' },
         { label: 'Save', action: 'file:save', accelerator: 'Ctrl+S' },
         { label: 'Save as…', action: 'file:saveAs', accelerator: 'Ctrl+Shift+S' },
+        { label: 'AutoSave every 30 seconds', action: 'file:autosave', checked: autosave },
         { separator: true, label: '' },
         { label: 'Export as HTML…', action: 'file:export:html' },
         { label: 'Export as PDF…', action: 'file:export:pdf' },
@@ -232,7 +235,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
   ]
 }
 
-export default function MenuBar({ onAction, recentFiles, theme, pageView = false, scansShown = false, openMode = 'ask' }: Props): React.JSX.Element {
+export default function MenuBar({ onAction, recentFiles, theme, pageView = false, scansShown = false, openMode = 'ask', autosave = true }: Props): React.JSX.Element {
   const [open, setOpen] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -294,7 +297,7 @@ export default function MenuBar({ onAction, recentFiles, theme, pageView = false
     onAction(action)
   }
 
-  const all = menus(recentFiles, theme, pageView, scansShown, openMode)
+  const all = menus(recentFiles, theme, pageView, scansShown, openMode, autosave)
 
   return (
     <div className="menubar" ref={ref}>

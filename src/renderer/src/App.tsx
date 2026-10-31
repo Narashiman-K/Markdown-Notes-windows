@@ -75,6 +75,9 @@ type Mode = 'view' | 'edit'
 type SidebarMode = 'none' | 'outline' | 'comments'
 type Theme = 'light' | 'dark' | 'system'
 
+/** How often AutoSave runs while there are unsaved changes (shortened for the test run). */
+const AUTOSAVE_MS = window.api?.smokeMode ? 1500 : 30_000
+
 export default function App(): React.JSX.Element {
   const [content, setContent] = useState(WELCOME)
   const [filePath, setFilePath] = useState<string | null>(null)
@@ -100,6 +103,17 @@ export default function App(): React.JSX.Element {
   const docHasScans = useMemo(() => hasScans(content), [content])
   useEffect(() => setPageViewChoice(null), [filePath, fileName])
   const [dirty, setDirty] = useState(false)
+  /*
+   * AutoSave (File menu, on by default). Every 30 seconds while there are
+   * unsaved changes, a document with a file is saved into it, and one without
+   * (new, converted or merged, not yet named) is kept as a recovery copy that
+   * the next start offers back if the app closes without saving it.
+   */
+  const [autosave, setAutosave] = useState(true)
+  const [autoSavedAt, setAutoSavedAt] = useState<Date | null>(null)
+  const [recoveryKept, setRecoveryKept] = useState(false)
+  /** This document's recovery copy; a new one for each document loaded. */
+  const recoveryId = useRef<string>(crypto.randomUUID())
   const [mode, setMode] = useState<Mode>('view')
   const [zoom, setZoom] = useState(1)
   const [theme, setTheme] = useState<Theme>('system')
@@ -309,6 +323,12 @@ export default function App(): React.JSX.Element {
   }, [flash, history, mode])
 
   const loadDocument = useCallback((path: string | null, text: string) => {
+    // The document being replaced was saved or knowingly discarded: its
+    // recovery copy goes, and the new document gets its own.
+    void window.api.clearRecovery(recoveryId.current)
+    recoveryId.current = crypto.randomUUID()
+    setAutoSavedAt(null)
+    setRecoveryKept(false)
     setContent(text)
     setFilePath(path)
     setDirty(false)
@@ -400,6 +420,9 @@ export default function App(): React.JSX.Element {
         setFileName(base)
         // Stay where you are. Saving used to switch to View mode, so after
         // every save you had to go back to Edit and find your place again.
+        void window.api.clearRecovery(recoveryId.current)
+        setRecoveryKept(false)
+        setAutoSavedAt(null)
         flash(`Saved ${base}`)
         return true
       }
@@ -578,6 +601,13 @@ export default function App(): React.JSX.Element {
       switch (action) {
         case 'file:new':
           return doNew()
+        case 'file:autosave': {
+          const next = !latest.current.autosave
+          setAutosave(next)
+          void window.api.setSettings({ autosave: next })
+          flash(next ? 'AutoSave on: changes are saved every 30 seconds.' : 'AutoSave off: only a recovery copy is kept until you save.')
+          return
+        }
         case 'file:newWindow':
           void window.api.newWindow()
           return
@@ -920,16 +950,32 @@ export default function App(): React.JSX.Element {
       })()
     })
     const offTheme = window.api.onSystemThemeChanged((isDark) => setSystemDark(isDark))
+    // A document the app closed without saving, offered back at start-up.
+    const offRecovered = window.api.onFileRecovered((entry) => {
+      loadDocument(entry.filePath, entry.content)
+      recoveryId.current = entry.id
+      setDirty(true)
+      setRecoveryKept(true)
+      setMode('edit')
+      if (!entry.filePath) setFileName(entry.name || 'Untitled')
+      flash(`Recovered ${entry.name || 'Untitled'}: its changes are not saved yet.`)
+    })
     const offClose = window.api.onBeforeClose(() => {
       void (async () => {
-        if (await guardUnsavedRef.current()) window.api.forceClose()
+        if (await guardUnsavedRef.current()) {
+          // Saved, or deliberately not: nothing left to recover.
+          await window.api.clearRecovery(recoveryId.current)
+          window.api.forceClose()
+        }
       })()
     })
     const offDisk = window.api.onFileChangedOnDisk(({ filePath: p }) => {
       void (async () => {
         if (dirtyRef.current) return
         const r = await window.api.readFile(p)
-        if (r.ok && typeof r.content === 'string') {
+        // The app's own save (AutoSave every 30 s) also fires this; nothing
+        // changed, so there is nothing to reload or announce.
+        if (r.ok && typeof r.content === 'string' && r.content !== latest.current.content) {
           setContent(r.content)
           flash('Reloaded — file changed on disk.')
         }
@@ -947,6 +993,7 @@ export default function App(): React.JSX.Element {
       setOcrLanguages(normaliseOcrLanguages(s?.ocrLanguages))
       setKeepPageImages(s?.keepPageImages === true)
       if (s?.openFromExplorer) setOpenMode(s.openFromExplorer)
+      if (typeof s?.autosave === 'boolean') setAutosave(s.autosave)
       if (s?.reader) setReader({ ...DEFAULT_READER, ...(s.reader as Partial<ReaderSettings>) })
     })
 
@@ -966,6 +1013,7 @@ export default function App(): React.JSX.Element {
       offMenu()
       offOpened()
       offTheme()
+      offRecovered()
       offClose()
       offDisk()
       document.removeEventListener('selectionchange', onSel)
@@ -976,6 +1024,55 @@ export default function App(): React.JSX.Element {
   guardUnsavedRef.current = guardUnsaved
   const dirtyRef = useRef(dirty)
   dirtyRef.current = dirty
+
+  /* ------------------------------------------------------------ AutoSave */
+
+  const latest = useRef({ content, filePath, fileName, autosave })
+  latest.current = { content, filePath, fileName, autosave }
+  const autosaveTimer = useRef<number | null>(null)
+
+  const runAutosave = useCallback(async () => {
+    if (!dirtyRef.current) return
+    const { content: text, filePath: path, fileName: name, autosave: on } = latest.current
+    if (on && path) {
+      const r = await window.api.saveFile({ filePath: path, content: text, quiet: true })
+      if (r.ok) {
+        // Typing may have gone on while the file was written; only what was
+        // written counts as saved.
+        if (latest.current.content === text) setDirty(false)
+        setAutoSavedAt(new Date())
+        setRecoveryKept(false)
+        void window.api.clearRecovery(recoveryId.current)
+        return
+      }
+    }
+    // No file to save into, AutoSave off, or the save failed (a read-only or
+    // disconnected drive): keep a recovery copy instead.
+    const r = await window.api.writeRecovery({ id: recoveryId.current, name, filePath: path, content: text })
+    if (r?.ok) setRecoveryKept(true)
+  }, [])
+
+  useEffect(() => {
+    if (!dirty) {
+      if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current)
+      autosaveTimer.current = null
+      return
+    }
+    // Every 30 seconds while changes go on, not 30 seconds after the last
+    // keystroke: steady typing would otherwise never be saved.
+    if (autosaveTimer.current) return
+    autosaveTimer.current = window.setTimeout(() => {
+      autosaveTimer.current = null
+      void runAutosave()
+    }, AUTOSAVE_MS)
+  }, [dirty, content, runAutosave])
+
+  useEffect(
+    () => () => {
+      if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current)
+    },
+    []
+  )
 
   useEffect(() => {
     installSignature()
@@ -1072,6 +1169,7 @@ export default function App(): React.JSX.Element {
         pageView={pageView}
         scansShown={docHasScans && showScans}
         openMode={openMode}
+        autosave={autosave}
       />
       <Toolbar
         mode={mode}
@@ -1180,7 +1278,15 @@ export default function App(): React.JSX.Element {
         <span>{annotations.length} annotations</span>
         <span>~{stats.readMin} min read</span>
         <span className="grow" />
-        <span>{dirty ? 'Unsaved changes' : 'Saved'}</span>
+        <span title={autosave ? 'AutoSave is on (File menu)' : 'AutoSave is off (File menu)'}>
+          {dirty
+            ? recoveryKept
+              ? 'Unsaved changes · recovery copy kept'
+              : 'Unsaved changes'
+            : autoSavedAt
+              ? `Saved automatically at ${autoSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+              : 'Saved'}
+        </span>
         <span>{Math.round(zoom * 100)}%</span>
       </footer>
 

@@ -703,6 +703,44 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
     await wait(600)
     const back = JSON.parse(await scans())
     check('undo puts the pictures back', back.imgs === 2, JSON.stringify(back))
+
+    /*
+     * 16 — AutoSave (30 s for users, 1.5 s in this run). Edits to a document
+     * with a file land in the file without pressing Save; a new document with
+     * no file gets a recovery copy in the profile instead.
+     */
+    mark('autosave')
+    {
+      const doc = join(outDir, 'autosave-check.md')
+      writeFileSync(doc, '# AutoSave check\n\nOriginal text.\n', 'utf8')
+      win.webContents.send('menu:action', { action: 'file:openPath', payload: doc })
+      await wait(1200)
+      win.webContents.send('menu:action', { action: 'view:mode:edit' })
+      await wait(800)
+      await js<boolean>(`(() => { const c = document.querySelector('.cm-content'); c?.focus(); return !!c })()`)
+      win.webContents.insertText('Typed but never saved by hand. ')
+      await wait(4000)
+      const onDisk = await fsp.readFile(doc, 'utf8')
+      const status = await js<string>(`document.querySelector('.statusbar')?.textContent || ''`)
+      check('AutoSave writes edits into the file', onDisk.includes('Typed but never saved by hand.'), onDisk.slice(0, 80))
+      check('the status bar says it was saved automatically', /Saved automatically at/.test(status), status.slice(-60))
+      const mode = await js<string>(`document.querySelector('.statusbar')?.textContent || ''`)
+      check('still in Edit mode after the save', /Edit mode/.test(mode), mode.slice(0, 30))
+
+      win.webContents.send('menu:action', { action: 'file:new' })
+      await wait(1200)
+      await js<boolean>(`(() => { const c = document.querySelector('.cm-content'); c?.focus(); return !!c })()`)
+      win.webContents.insertText('A new document nobody has named yet.')
+      await wait(4000)
+      const dir = join(app.getPath('userData'), 'Recovery')
+      const copies = await fsp.readdir(dir).catch(() => [] as string[])
+      let found = false
+      for (const f of copies) {
+        const body = await fsp.readFile(join(dir, f), 'utf8').catch(() => '')
+        if (body.includes('A new document nobody has named yet.')) found = true
+      }
+      check('a new document gets a recovery copy', found, `${copies.length} copies`)
+    }
   } catch (err) {
     check('unexpected error', false, String((err as Error)?.stack ?? err))
   }

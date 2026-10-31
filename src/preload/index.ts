@@ -11,7 +11,7 @@ function on<T>(channel: string, cb: Listener<T>): () => void {
 const api = {
   openDialog: () => ipcRenderer.invoke('dialog:open'),
   readFile: (filePath: string) => ipcRenderer.invoke('file:read', filePath),
-  saveFile: (args: { filePath: string | null; content: string; saveAs?: boolean }) =>
+  saveFile: (args: { filePath: string | null; content: string; saveAs?: boolean; quiet?: boolean }) =>
     ipcRenderer.invoke('file:save', args),
   exportHtml: (args: { html: string; suggestedName: string }) => ipcRenderer.invoke('file:exportHtml', args),
   exportPdf: (args: { html: string; suggestedName: string }) => ipcRenderer.invoke('file:exportPdf', args),
@@ -86,6 +86,12 @@ const api = {
   forceClose: () => ipcRenderer.invoke('app:forceClose'),
   /** File > New window: another document window. */
   newWindow: () => ipcRenderer.invoke('app:newWindow'),
+  /** AutoSave's recovery copies (main/index.ts, recovery:*). */
+  writeRecovery: (args: { id: string; name: string; filePath: string | null; content: string }) =>
+    ipcRenderer.invoke('recovery:write', args),
+  clearRecovery: (id: string) => ipcRenderer.invoke('recovery:clear', id),
+  onFileRecovered: (cb: Listener<{ id: string; name: string; filePath: string | null; content: string; savedAt: string }>) =>
+    on('file:recovered', cb),
   dirname: (p: string) => ipcRenderer.invoke('path:dirname', p),
   basename: (p: string) => ipcRenderer.invoke('path:basename', p),
 

@@ -45,6 +45,8 @@ export interface Settings {
   lastDialogDir?: string
   /** Where a .md opened from Explorer goes while the app is running. */
   openFromExplorer: 'ask' | 'new' | 'here'
+  /** Save into the file every 30 s while there are changes (recovery copy when there is no file). */
+  autosave: boolean
 }
 
 const DEFAULTS: Settings = {
@@ -63,7 +65,8 @@ const DEFAULTS: Settings = {
   reader: { width: 'medium', size: 'normal', spacing: 'normal', palette: 'auto' },
   ocrLanguages: ['eng'],
   keepPageImages: false,
-  openFromExplorer: 'ask'
+  openFromExplorer: 'ask',
+  autosave: true
 }
 
 let cache: Settings | null = null

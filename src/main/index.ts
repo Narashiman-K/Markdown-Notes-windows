@@ -518,8 +518,11 @@ function registerIpc(): void {
     readOrOfferConversion(filePath)
   )
 
-  handle('file:save', async (_e, args: { filePath: string | null; content: string; saveAs?: boolean }) => {
+  handle('file:save', async (_e, args: { filePath: string | null; content: string; saveAs?: boolean; quiet?: boolean }) => {
     let target = args.filePath
+    // AutoSave never opens a dialog: a document with no file gets a recovery
+    // copy instead (recovery:write).
+    if (args.quiet && (!target || args.saveAs)) return { ok: false, canceled: true }
     if (!target || args.saveAs) {
       const r = await dialog.showSaveDialog(currentWindow()!, {
         title: args.saveAs ? 'Save a copy as' : 'Save Markdown file',
@@ -534,9 +537,13 @@ function registerIpc(): void {
     try {
       stopWatching()
       await fsp.writeFile(target, args.content, 'utf8')
-      addRecent(target)
-      const owner = currentWindow()
-    if (owner) buildMenu(owner, (a, p) => send('menu:action', { action: a, payload: p }))
+      // AutoSave (quiet) does not touch the recent list or the menu every
+      // 30 seconds; the file is already on both.
+      if (!args.quiet) {
+        addRecent(target)
+        const owner = currentWindow()
+        if (owner) buildMenu(owner, (a, p) => send('menu:action', { action: a, payload: p }))
+      }
       watchFile(target)
       return { ok: true, filePath: target }
     } catch (err) {
@@ -904,6 +911,15 @@ function registerIpc(): void {
       pendingOpen.delete(win.id)
       void openPathInRenderer(path, win)
     }
+    const recovered = win ? pendingRecovery.get(win.id) : undefined
+    if (win && recovered) {
+      pendingRecovery.delete(win.id)
+      recoveryOwners.set(recovered.id, win.id)
+      win.webContents.send('file:recovered', recovered)
+    } else if (win && !path && !recoveryOffered && !harness) {
+      recoveryOffered = true
+      void offerRecovery(win)
+    }
     return { ok: true }
   })
 
@@ -966,6 +982,31 @@ function registerIpc(): void {
     }
   })
 
+  /*
+   * Recovery copies (AutoSave, for documents it cannot save into a file: new,
+   * converted or merged ones not yet named, or any document while AutoSave is
+   * off). One JSON file per open document, under the profile's Recovery
+   * folder, rewritten every 30 s while it has unsaved changes and deleted
+   * once it is saved or deliberately discarded. What is left after a crash
+   * or a forced close is offered back at the next start (offerRecovery).
+   */
+  handle('recovery:write', async (_e, args: { id: string; name: string; filePath: string | null; content: string }) => {
+    if (!/^[\w-]{8,64}$/.test(args.id)) return { ok: false }
+    const win = currentWindow()
+    if (win) recoveryOwners.set(args.id, win.id)
+    await fsp.mkdir(recoveryDir(), { recursive: true })
+    const entry: RecoveryEntry = { ...args, savedAt: new Date().toISOString() }
+    await fsp.writeFile(join(recoveryDir(), `${args.id}.json`), JSON.stringify(entry), 'utf8')
+    return { ok: true }
+  })
+
+  handle('recovery:clear', async (_e, id: string) => {
+    if (!/^[\w-]{8,64}$/.test(id)) return { ok: false }
+    recoveryOwners.delete(id)
+    await fsp.unlink(join(recoveryDir(), `${id}.json`)).catch(() => undefined)
+    return { ok: true }
+  })
+
   // File > New window (Ctrl+Shift+N): another document, side by side.
   handle('app:newWindow', () => {
     createWindow()
@@ -974,6 +1015,73 @@ function registerIpc(): void {
 }
 
 /* ------------------------------------------------------------- app lifecycle */
+
+/* --------------------------------------------------------------- recovery */
+
+interface RecoveryEntry {
+  id: string
+  name: string
+  filePath: string | null
+  content: string
+  savedAt: string
+}
+
+const recoveryDir = (): string => join(app.getPath('userData'), 'Recovery')
+/** Recovery id -> the window keeping it current. */
+const recoveryOwners = new Map<string, number>()
+/** Recovered documents waiting for their new window to be ready. */
+const pendingRecovery = new Map<number, RecoveryEntry>()
+let recoveryOffered = false
+
+/**
+ * At start-up: documents left with unsaved changes when the app last closed
+ * without saving them (a crash, a power cut, Windows restarting for updates)
+ * are offered back, each in its own window.
+ */
+async function offerRecovery(win: BrowserWindow): Promise<void> {
+  let entries: RecoveryEntry[] = []
+  try {
+    const files = (await fsp.readdir(recoveryDir())).filter((f) => f.endsWith('.json'))
+    for (const f of files) {
+      try {
+        const entry = JSON.parse(await fsp.readFile(join(recoveryDir(), f), 'utf8')) as RecoveryEntry
+        if (!recoveryOwners.has(entry.id) && typeof entry.content === 'string') entries.push(entry)
+      } catch {
+        /* a damaged copy is skipped, not fatal */
+      }
+    }
+  } catch {
+    return // no Recovery folder: nothing to offer
+  }
+  if (!entries.length) return
+  entries = entries.sort((a, b) => b.savedAt.localeCompare(a.savedAt))
+  const names = entries.map((e) => `• ${e.name} (${new Date(e.savedAt).toLocaleString()})`).join('\n')
+  const r = await dialog.showMessageBox(win, {
+    type: 'warning',
+    title: 'Recover unsaved documents',
+    message:
+      entries.length === 1
+        ? 'A document had unsaved changes when the app last closed.'
+        : `${entries.length} documents had unsaved changes when the app last closed.`,
+    detail: `${names}\n\nRecover them? Each opens in its own window, with the changes still unsaved.`,
+    buttons: ['Recover', 'Discard', 'Not now'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true
+  })
+  if (r.response === 2) return
+  if (r.response === 1) {
+    for (const e of entries) await fsp.unlink(join(recoveryDir(), `${e.id}.json`)).catch(() => undefined)
+    return
+  }
+  const [first, ...rest] = entries
+  recoveryOwners.set(first.id, win.id)
+  win.webContents.send('file:recovered', first)
+  for (const e of rest) {
+    const w = createWindow()
+    pendingRecovery.set(w.id, e)
+  }
+}
 
 const samePath = (a: string, b: string): boolean => normalize(a).toLowerCase() === normalize(b).toLowerCase()
 
