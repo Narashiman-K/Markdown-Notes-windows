@@ -92,8 +92,6 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
         { label: 'New window', action: 'file:newWindow', accelerator: 'Ctrl+Shift+N' },
         { label: 'Open…', action: 'file:open', accelerator: 'Ctrl+O' },
         { separator: true, label: '' },
-        ...recent,
-        { separator: true, label: '' },
         { label: 'Save', action: 'file:save', accelerator: 'Ctrl+S' },
         { label: 'Save as…', action: 'file:saveAs', accelerator: 'Ctrl+Shift+S' },
         { label: 'AutoSave every 30 seconds', action: 'file:autosave', checked: autosave },
@@ -121,6 +119,10 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
           ? []
           : [{ label: 'No cloud folders found on this PC', hint: 'Install OneDrive, Google Drive or Dropbox for desktop, or add a folder', heading: true }]),
         { label: 'Add a cloud folder…', action: 'file:addCloudFolder' },
+        { separator: true, label: '' },
+        // Recent files after the cloud folders, so the places to open from
+        // and the files opened lately sit together.
+        ...recent,
         { separator: true, label: '' },
         // Where a .md double-clicked in Explorer opens while the app is running.
         { label: 'Files opened from Explorer', heading: true },

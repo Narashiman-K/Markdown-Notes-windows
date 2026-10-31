@@ -191,7 +191,7 @@ function createWindow(openPath?: string): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1f1f1f' : '#ffffff',
-    title: APP_DISPLAY_NAME,
+    title: `${APP_DISPLAY_NAME} V${app.getVersion()}`,
     // Without this the window and taskbar show Electron's default icon during
     // development. The packaged executable carries the icon itself, but setting
     // it here makes both builds consistent.
@@ -1008,7 +1008,7 @@ function registerIpc(): void {
   handle('app:setTitle', (_e, args: { filePath: string | null; dirty: boolean }) => {
     const name = args.filePath ? basename(args.filePath) : 'Untitled'
     const win = currentWindow()
-    win?.setTitle(`${args.dirty ? '• ' : ''}${name} — ${APP_DISPLAY_NAME}`)
+    win?.setTitle(`${args.dirty ? '• ' : ''}${name} — ${APP_DISPLAY_NAME} V${app.getVersion()}`)
     if (args.filePath) win?.setRepresentedFilename?.(args.filePath)
     // Which file each window shows, so a file opened from Explorer that is
     // already open just brings its window forward.
