@@ -14,6 +14,7 @@ import {
   describeImport,
   exportAnnotations,
   importAnnotations,
+  annotationsNotInFile,
   parseAnnotationsFile
 } from './lib/annotationTransfer'
 import AiPanel from './components/AiPanel'
@@ -678,8 +679,23 @@ export default function App(): React.JSX.Element {
         flash(String((err as Error).message ?? err))
         return
       }
-      const r = importAnnotations(content, file)
-      if (r.placed) commitContent(r.source, `Load annotations (${r.placed})`)
+      // Annotations here that the file does not have: keep them (add only),
+      // or remove them so the document matches the file.
+      const extras = annotationsNotInFile(content, file)
+      let replace = false
+      if (extras.length) {
+        const list = extras
+          .slice(0, 8)
+          .map((x) => `• “${x.text.replace(/\s+/g, ' ').trim().slice(0, 70)}”`)
+          .join('\n')
+        replace = await window.api.confirm({
+          title: 'Load annotations',
+          message: `This document has ${extras.length} annotation${extras.length === 1 ? '' : 's'} that ${extras.length === 1 ? 'is' : 'are'} not in ${name}. Remove ${extras.length === 1 ? 'it' : 'them'} so the document matches the file?`,
+          detail: `${list}${extras.length > 8 ? `\n…and ${extras.length - 8} more` : ''}\n\nYes: remove, so the annotations are exactly the file's.\nNo: keep, and only add what the file has. Either way Ctrl+Z undoes the load.`
+        })
+      }
+      const r = importAnnotations(content, file, { replace })
+      if (r.placed || r.removed) commitContent(r.source, `Load annotations (${r.placed} added${r.removed ? `, ${r.removed} removed` : ''})`)
       const { summary, detail } = describeImport(r, name)
       if (detail) await window.api.message({ type: r.notPlaced.length ? 'warning' : 'info', title: 'Load annotations', message: summary, detail })
       else flash(summary)

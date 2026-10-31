@@ -4,6 +4,7 @@ import {
   annotationSummary,
   exportAnnotations,
   importAnnotations,
+  annotationsNotInFile,
   parseAnnotationsFile,
   type AnnotationsFile
 } from '../src/renderer/src/lib/annotationTransfer'
@@ -133,6 +134,24 @@ describe('re-importing annotations', () => {
     expect(r2.placed).toBe(1)
     expect(r2.duplicates).toBe(1)
     expect(listAnnotations(r2.source)).toHaveLength(2)
+  })
+
+  it('can make the document match the file, removing what the file does not have', () => {
+    // The reported case: five annotations, one removed, the rest exported;
+    // the document still has all five. Adding changes nothing; matching
+    // removes the one the file no longer has.
+    const extra = mark(SOURCE, 'Revenue rose again', { type: 'strike' })
+    expect(annotationsNotInFile(extra, file()).map((a) => a.text)).toEqual(['Revenue rose again'])
+
+    const added = importAnnotations(extra, file())
+    expect(added.placed).toBe(0)
+    expect(added.removed).toBe(0)
+    expect(listAnnotations(added.source)).toHaveLength(3)
+
+    const matched = importAnnotations(extra, file(), { replace: true })
+    expect(matched.removed).toBe(1)
+    expect(matched.placed).toBe(0)
+    expect(matched.source).toBe(SOURCE)
   })
 
   it('nests a new annotation on the same words inside an existing one', () => {

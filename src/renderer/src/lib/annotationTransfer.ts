@@ -26,6 +26,7 @@ import {
   findMatchingClose,
   newId,
   removeAllAnnotations,
+  removeAnnotation,
   unescapeAttr,
   type AnnotationInput
 } from './annotations'
@@ -315,14 +316,52 @@ function locate(clean: string, a: ExportedAnnotation, expected: number): { start
 export interface ImportResult {
   source: string
   placed: number
+  /** Annotations that were on the document but not in the file, removed (replace mode). */
+  removed: number
   /** Of those placed, how many needed a close match rather than the exact words. */
   approximate: number
   duplicates: number
   notPlaced: ExportedAnnotation[]
 }
 
-/** Puts exported annotations onto `source`, which may have annotations of its own. */
-export function importAnnotations(source: string, file: AnnotationsFile): ImportResult {
+/** Where each annotation in the file belongs in `clean`, by kind and place. */
+function fileKeys(clean: string, file: AnnotationsFile): Set<string> {
+  const scale = clean.length / Math.max(1, file.textLength)
+  const keys = new Set<string>()
+  for (const a of file.annotations) {
+    const where = locate(clean, a, Math.round(a.position * scale))
+    if (where) keys.add(`${a.type}:${where.start}:${where.end}`)
+  }
+  return keys
+}
+
+/**
+ * Annotations on the document that the file does not have: what "make the
+ * document match the file" would remove. Their ids and words, for asking.
+ */
+export function annotationsNotInFile(source: string, file: AnnotationsFile): Array<{ id: string; text: string }> {
+  const clean = removeAllAnnotations(source)
+  const keys = fileKeys(clean, file)
+  const { spans, tags } = scan(source)
+  return spans
+    .filter((s) => !keys.has(`${attr(s.tag, 'data-mn-type')}:${toClean(tags, s.rawStart)}:${toClean(tags, s.rawEnd)}`))
+    .map((s) => ({ id: s.id, text: clean.slice(toClean(tags, s.rawStart), toClean(tags, s.rawEnd)) }))
+}
+
+/**
+ * Puts exported annotations onto `source`, which may have annotations of its
+ * own. Those are kept (duplicates skipped) unless `replace` is set: then the
+ * ones the file does not have are removed first, and the document ends up
+ * with exactly the file's annotations.
+ */
+export function importAnnotations(source: string, file: AnnotationsFile, opts: { replace?: boolean } = {}): ImportResult {
+  let removed = 0
+  if (opts.replace) {
+    for (const extra of annotationsNotInFile(source, file)) {
+      source = removeAnnotation(source, extra.id)
+      removed++
+    }
+  }
   const clean = removeAllAnnotations(source)
   const scale = clean.length / Math.max(1, file.textLength)
 
@@ -376,12 +415,13 @@ export function importAnnotations(source: string, file: AnnotationsFile): Import
     placed++
     if (where.how === 'similar') approximate++
   }
-  return { source: out, placed, approximate, duplicates, notPlaced }
+  return { source: out, placed, removed, approximate, duplicates, notPlaced }
 }
 
 /** What an import did, for a message: a summary line and the details. */
 export function describeImport(r: ImportResult, fileName: string): { summary: string; detail: string } {
   const parts = [`${r.placed} annotation${r.placed === 1 ? '' : 's'} placed from ${fileName}`]
+  if (r.removed) parts.push(`${r.removed} not in the file removed`)
   if (r.duplicates) parts.push(`${r.duplicates} already here, skipped`)
   if (r.notPlaced.length) parts.push(`${r.notPlaced.length} could not be placed`)
   const lines: string[] = []
