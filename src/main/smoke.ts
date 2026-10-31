@@ -741,6 +741,32 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       }
       check('a new document gets a recovery copy', found, `${copies.length} copies`)
     }
+
+    /*
+     * 17 — cloud storage folders. A folder added by hand (as File > Add a
+     * cloud folder… does) appears under File > Cloud storage, and a document
+     * inside it shows the cloud's name in the status bar.
+     */
+    mark('cloud folders')
+    {
+      await js<boolean>(`(async () => { await window.api.setSettings({ cloudFolders: [{ label: 'Test Cloud', path: ${JSON.stringify(outDir)} }] }); window.dispatchEvent(new Event('focus')); return true })()`)
+      await wait(800)
+      const listed = await js<string>(`(async () => JSON.stringify(await window.api.cloudFolders()))()`)
+      check('an added cloud folder is listed', listed.includes('Test Cloud'), listed.slice(0, 120))
+      win.webContents.send('menu:action', { action: 'file:openPath', payload: join(outDir, 'autosave-check.md') })
+      await wait(1500)
+      const status = await js<string>(`document.querySelector('.statusbar')?.textContent || ''`)
+      check('a document in a cloud folder says so in the status bar', status.includes('☁ Test Cloud'), status.slice(-70))
+      const menu = await js<string>(`(async () => {
+        const file = [...document.querySelectorAll('.menubar button')].find((b) => b.textContent.trim() === 'File');
+        file?.click();
+        await new Promise((r) => setTimeout(r, 300));
+        const text = document.querySelector('.menu-dropdown')?.textContent || '';
+        file?.click();
+        return text;
+      })()`)
+      check('File menu offers Open from / Save a copy to the cloud folder', menu.includes('Open from Test Cloud') && menu.includes('Save a copy to Test Cloud'), menu.includes('Cloud storage') ? 'Cloud storage section present' : 'missing')
+    }
   } catch (err) {
     check('unexpected error', false, String((err as Error)?.stack ?? err))
   }

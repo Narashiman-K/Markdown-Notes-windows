@@ -9,9 +9,9 @@ function on<T>(channel: string, cb: Listener<T>): () => void {
 }
 
 const api = {
-  openDialog: () => ipcRenderer.invoke('dialog:open'),
+  openDialog: (opts?: { folder?: string }) => ipcRenderer.invoke('dialog:open', opts),
   readFile: (filePath: string) => ipcRenderer.invoke('file:read', filePath),
-  saveFile: (args: { filePath: string | null; content: string; saveAs?: boolean; quiet?: boolean }) =>
+  saveFile: (args: { filePath: string | null; content: string; saveAs?: boolean; quiet?: boolean; folder?: string }) =>
     ipcRenderer.invoke('file:save', args),
   exportHtml: (args: { html: string; suggestedName: string }) => ipcRenderer.invoke('file:exportHtml', args),
   exportPdf: (args: { html: string; suggestedName: string }) => ipcRenderer.invoke('file:exportPdf', args),
@@ -86,6 +86,10 @@ const api = {
   forceClose: () => ipcRenderer.invoke('app:forceClose'),
   /** File > New window: another document window. */
   newWindow: () => ipcRenderer.invoke('app:newWindow'),
+  /** Synced cloud folders on this PC (main/cloud-folders.ts). */
+  cloudFolders: (): Promise<Array<{ provider: string; label: string; path: string }>> => ipcRenderer.invoke('cloud:folders'),
+  addCloudFolder: (): Promise<{ ok: boolean; folders?: Array<{ provider: string; label: string; path: string }> }> =>
+    ipcRenderer.invoke('cloud:addFolder'),
   /** AutoSave's recovery copies (main/index.ts, recovery:*). */
   writeRecovery: (args: { id: string; name: string; filePath: string | null; content: string }) =>
     ipcRenderer.invoke('recovery:write', args),

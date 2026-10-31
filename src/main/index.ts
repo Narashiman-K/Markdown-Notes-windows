@@ -5,6 +5,7 @@ import { promises as fsp, watch as fsWatch, existsSync, rmSync, type FSWatcher }
 import { tmpdir } from 'node:os'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { buildMenu } from './menu'
+import { cloudFolders } from './cloud-folders'
 import { getSettings, setSettings, addRecent, clearRecent } from './store'
 import * as ai from './ai'
 import * as secrets from './secrets'
@@ -498,10 +499,11 @@ function registerIpc(): void {
     ipcMain.handle(channel, (e, ...args) => senderWindow.run(BrowserWindow.fromWebContents(e.sender), () => fn(e, ...args)))
   }
 
-  handle('dialog:open', async () => {
+  handle('dialog:open', async (_e, opts?: { folder?: string }) => {
     const r = await dialog.showOpenDialog(currentWindow()!, {
       title: 'Open document',
-      defaultPath: lastFolder(),
+      // File > "Open from OneDrive…" and the like start in that folder.
+      defaultPath: opts?.folder && existsSync(opts.folder) ? opts.folder : lastFolder(),
       properties: ['openFile'],
       filters: [
         { name: 'Markdown & text', extensions: READABLE_EXTS },
@@ -518,7 +520,7 @@ function registerIpc(): void {
     readOrOfferConversion(filePath)
   )
 
-  handle('file:save', async (_e, args: { filePath: string | null; content: string; saveAs?: boolean; quiet?: boolean }) => {
+  handle('file:save', async (_e, args: { filePath: string | null; content: string; saveAs?: boolean; quiet?: boolean; folder?: string }) => {
     let target = args.filePath
     // AutoSave never opens a dialog: a document with no file gets a recovery
     // copy instead (recovery:write).
@@ -526,7 +528,11 @@ function registerIpc(): void {
     if (!target || args.saveAs) {
       const r = await dialog.showSaveDialog(currentWindow()!, {
         title: args.saveAs ? 'Save a copy as' : 'Save Markdown file',
-        defaultPath: target ?? join(lastFolder(), 'Untitled.md'),
+        // "Save to OneDrive…" and the like: that folder, keeping the name.
+        defaultPath:
+          args.folder && existsSync(args.folder)
+            ? join(args.folder, target ? basename(target) : 'Untitled.md')
+            : (target ?? join(lastFolder(), 'Untitled.md')),
         filters: MD_FILTERS
       })
       if (r.canceled || !r.filePath) return { ok: false, canceled: true }
@@ -1005,6 +1011,24 @@ function registerIpc(): void {
     recoveryOwners.delete(id)
     await fsp.unlink(join(recoveryDir(), `${id}.json`)).catch(() => undefined)
     return { ok: true }
+  })
+
+  // Cloud storage: the folders OneDrive, Google Drive and the rest sync.
+  handle('cloud:folders', () => cloudFolders())
+
+  handle('cloud:addFolder', async () => {
+    const r = await dialog.showOpenDialog(currentWindow()!, {
+      title: 'Add a cloud folder (a folder your cloud storage app keeps in sync)',
+      properties: ['openDirectory'],
+      defaultPath: app.getPath('home')
+    })
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+    const path = r.filePaths[0]
+    const current = getSettings().cloudFolders ?? []
+    if (!current.some((c) => c.path.toLowerCase() === path.toLowerCase())) {
+      setSettings({ cloudFolders: [...current, { label: basename(path), path }] })
+    }
+    return { ok: true, folders: await cloudFolders() }
   })
 
   // File > New window (Ctrl+Shift+N): another document, side by side.

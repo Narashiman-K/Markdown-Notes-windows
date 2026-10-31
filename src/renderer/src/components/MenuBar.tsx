@@ -48,9 +48,12 @@ interface Props {
   openMode?: OpenMode
   /** Ticks File > AutoSave. */
   autosave?: boolean
+  /** File > Cloud storage. */
+  cloudFolders?: CloudFolder[]
 }
 
 type OpenMode = 'ask' | 'new' | 'here'
+type CloudFolder = { label: string; path: string }
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() ?? p
 const dirname = (p: string): string => {
@@ -59,7 +62,7 @@ const dirname = (p: string): string => {
   return parts.join('\\') || p
 }
 
-function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, scansShown: boolean, openMode: OpenMode, autosave: boolean): Menu[] {
+function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, scansShown: boolean, openMode: OpenMode, autosave: boolean, cloud: CloudFolder[]): Menu[] {
   /*
    * Recent files are listed inline rather than in a submenu. The native menu
    * nested them, but one level of nesting for a list this short buys nothing
@@ -104,6 +107,17 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
         { label: 'Converter settings…', action: 'convert:settings' },
         { separator: true, label: '' },
         { label: 'Print…', action: 'file:print', accelerator: 'Ctrl+P' },
+        { separator: true, label: '' },
+        // The folders OneDrive, Google Drive and the like keep in sync.
+        { label: 'Cloud storage', heading: true },
+        ...cloud.flatMap((c) => [
+          { label: `Open from ${c.label}…`, action: `file:openIn:${c.path}`, hint: c.path },
+          { label: `Save a copy to ${c.label}…`, action: `file:saveIn:${c.path}` }
+        ]),
+        ...(cloud.length
+          ? []
+          : [{ label: 'No cloud folders found on this PC', hint: 'Install OneDrive, Google Drive or Dropbox for desktop, or add a folder', heading: true }]),
+        { label: 'Add a cloud folder…', action: 'file:addCloudFolder' },
         { separator: true, label: '' },
         // Where a .md double-clicked in Explorer opens while the app is running.
         { label: 'Files opened from Explorer', heading: true },
@@ -235,7 +249,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
   ]
 }
 
-export default function MenuBar({ onAction, recentFiles, theme, pageView = false, scansShown = false, openMode = 'ask', autosave = true }: Props): React.JSX.Element {
+export default function MenuBar({ onAction, recentFiles, theme, pageView = false, scansShown = false, openMode = 'ask', autosave = true, cloudFolders = [] }: Props): React.JSX.Element {
   const [open, setOpen] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -288,6 +302,13 @@ export default function MenuBar({ onAction, recentFiles, theme, pageView = false
       onAction('file:openPath', action.slice('file:openPath:'.length))
       return
     }
+    // Cloud storage items carry their folder the same way.
+    for (const kind of ['file:openIn:', 'file:saveIn:']) {
+      if (action.startsWith(kind)) {
+        onAction(kind.slice(0, -1), action.slice(kind.length))
+        return
+      }
+    }
 
     if (action === 'help:featureVote') {
       window.open(featureRequestUrl(), '_blank')
@@ -297,7 +318,7 @@ export default function MenuBar({ onAction, recentFiles, theme, pageView = false
     onAction(action)
   }
 
-  const all = menus(recentFiles, theme, pageView, scansShown, openMode, autosave)
+  const all = menus(recentFiles, theme, pageView, scansShown, openMode, autosave, cloudFolders)
 
   return (
     <div className="menubar" ref={ref}>

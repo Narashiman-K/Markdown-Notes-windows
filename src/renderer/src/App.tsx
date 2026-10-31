@@ -111,6 +111,13 @@ export default function App(): React.JSX.Element {
    */
   const [autosave, setAutosave] = useState(true)
   const [autoSavedAt, setAutoSavedAt] = useState<Date | null>(null)
+  /** Synced cloud folders on this PC: File > Cloud storage, and the status bar. */
+  const [cloudFolders, setCloudFolders] = useState<Array<{ provider: string; label: string; path: string }>>([])
+  const cloudHome = useMemo(() => {
+    if (!filePath) return null
+    const p = filePath.toLowerCase()
+    return cloudFolders.find((c) => p.startsWith(c.path.toLowerCase().replace(/[\\/]?$/, '\\'))) ?? null
+  }, [filePath, cloudFolders])
   const [recoveryKept, setRecoveryKept] = useState(false)
   /** This document's recovery copy; a new one for each document loaded. */
   const recoveryId = useRef<string>(crypto.randomUUID())
@@ -406,13 +413,16 @@ export default function App(): React.JSX.Element {
     [flash, loadDocument]
   )
 
-  const doOpen = useCallback(async () => {
-    await handleOpenResult(await window.api.openDialog())
-  }, [handleOpenResult])
+  const doOpen = useCallback(
+    async (folder?: string) => {
+      await handleOpenResult(await window.api.openDialog(folder ? { folder } : undefined))
+    },
+    [handleOpenResult]
+  )
 
   const doSave = useCallback(
-    async (saveAs = false): Promise<boolean> => {
-      const r = await window.api.saveFile({ filePath, content, saveAs })
+    async (saveAs = false, folder?: string): Promise<boolean> => {
+      const r = await window.api.saveFile({ filePath, content, saveAs, folder })
       if (r.ok && r.filePath) {
         setFilePath(r.filePath)
         setDirty(false)
@@ -601,6 +611,18 @@ export default function App(): React.JSX.Element {
       switch (action) {
         case 'file:new':
           return doNew()
+        case 'file:openIn':
+          return doOpen(String(payload))
+        case 'file:saveIn':
+          return doSave(true, String(payload))
+        case 'file:addCloudFolder': {
+          const r = await window.api.addCloudFolder()
+          if (r.ok && r.folders) {
+            setCloudFolders(r.folders)
+            flash('Cloud folder added: it is in the File menu under Cloud storage.')
+          }
+          return
+        }
         case 'file:autosave': {
           const next = !latest.current.autosave
           setAutosave(next)
@@ -994,8 +1016,14 @@ export default function App(): React.JSX.Element {
       setKeepPageImages(s?.keepPageImages === true)
       if (s?.openFromExplorer) setOpenMode(s.openFromExplorer)
       if (typeof s?.autosave === 'boolean') setAutosave(s.autosave)
+      void window.api.cloudFolders().then(setCloudFolders)
       if (s?.reader) setReader({ ...DEFAULT_READER, ...(s.reader as Partial<ReaderSettings>) })
     })
+
+    // Cloud folders come and go (OneDrive signed into, Google Drive mounted
+    // after the app started): look again whenever the window comes forward.
+    const refreshCloud = (): void => void window.api.cloudFolders().then(setCloudFolders)
+    window.addEventListener('focus', refreshCloud)
 
     // Track the current selection so the AI panel can explain it.
     const onSel = (): void => {
@@ -1014,6 +1042,7 @@ export default function App(): React.JSX.Element {
       offOpened()
       offTheme()
       offRecovered()
+      window.removeEventListener('focus', refreshCloud)
       offClose()
       offDisk()
       document.removeEventListener('selectionchange', onSel)
@@ -1170,6 +1199,7 @@ export default function App(): React.JSX.Element {
         scansShown={docHasScans && showScans}
         openMode={openMode}
         autosave={autosave}
+        cloudFolders={cloudFolders}
       />
       <Toolbar
         mode={mode}
@@ -1278,6 +1308,9 @@ export default function App(): React.JSX.Element {
         <span>{annotations.length} annotations</span>
         <span>~{stats.readMin} min read</span>
         <span className="grow" />
+        {cloudHome && (
+          <span title={`In ${cloudHome.path}: ${cloudHome.label} keeps it in sync`}>☁ {cloudHome.label}</span>
+        )}
         <span title={autosave ? 'AutoSave is on (File menu)' : 'AutoSave is off (File menu)'}>
           {dirty
             ? recoveryKept
