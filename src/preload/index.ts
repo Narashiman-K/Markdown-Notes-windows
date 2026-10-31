@@ -16,6 +16,13 @@ const api = {
   exportHtml: (args: { html: string; suggestedName: string }) => ipcRenderer.invoke('file:exportHtml', args),
   exportPdf: (args: { html: string; suggestedName: string }) => ipcRenderer.invoke('file:exportPdf', args),
   exportMarkdown: (args: { text: string; suggestedName: string }) => ipcRenderer.invoke('file:exportMarkdown', args),
+  /** Annotations files and summaries (annotationTransfer.ts). */
+  exportText: (args: { text: string; suggestedName: string; folder?: string; title?: string }) =>
+    ipcRenderer.invoke('file:exportText', args),
+  pickAnnotations: (opts?: { folder?: string }): Promise<{ ok: boolean; canceled?: boolean; name?: string; content?: string; error?: string }> =>
+    ipcRenderer.invoke('dialog:pickAnnotations', opts),
+  annotationsBeside: (filePath: string): Promise<{ name: string; content: string } | null> =>
+    ipcRenderer.invoke('file:annotationsBeside', filePath),
   print: (args: { html: string; title?: string }) => ipcRenderer.invoke('file:print', args),
 
   findStart: (args: { text: string; forward?: boolean; findNext?: boolean }) => ipcRenderer.invoke('find:start', args),

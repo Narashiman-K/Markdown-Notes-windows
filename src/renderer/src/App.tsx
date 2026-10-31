@@ -9,6 +9,13 @@ import AboutDialog from './components/AboutDialog'
 import ConvertDialog from './components/ConvertDialog'
 import MergeDialog from './components/MergeDialog'
 import { normaliseOcrLanguages } from './lib/ocrLanguages'
+import {
+  annotationSummary,
+  describeImport,
+  exportAnnotations,
+  importAnnotations,
+  parseAnnotationsFile
+} from './lib/annotationTransfer'
 import AiPanel from './components/AiPanel'
 import DiffDialog from './components/DiffDialog'
 import { installSignature, signatureComment } from './lib/signature'
@@ -611,6 +618,75 @@ export default function App(): React.JSX.Element {
 
   /* ------------------------------------------------------- menu actions */
 
+  /* ------------------------------------------------ annotation transfer */
+
+  /*
+   * An annotations file beside the document just opened ("report.annotations
+   * .json" next to "report.md", as Export without annotations offers to
+   * save): offered once per document, and only when it holds annotations the
+   * document does not have yet.
+   */
+  const offeredBeside = useRef<string | null>(null)
+  useEffect(() => {
+    if (!filePath || offeredBeside.current === filePath) return
+    offeredBeside.current = filePath
+    const path = filePath
+    void (async () => {
+      const beside = await window.api.annotationsBeside(path)
+      if (!beside) return
+      let file
+      try {
+        file = parseAnnotationsFile(beside.content)
+      } catch {
+        return
+      }
+      const preview = importAnnotations(content, file)
+      if (!preview.placed) return
+      const load = await window.api.confirm({
+        title: 'Annotations found',
+        message: `“${beside.name}” beside this document has ${preview.placed} annotation${preview.placed === 1 ? '' : 's'} that ${preview.placed === 1 ? 'is' : 'are'} not on it yet. Load ${preview.placed === 1 ? 'it' : 'them'}?`,
+        detail: 'They are placed on the same words. You can also load annotations any time with File > Load annotations…'
+      })
+      if (load) await loadAnnotationsText(beside.content, beside.name)
+    })()
+    // Only a newly opened document is checked; content is read at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filePath])
+
+  /** Saves this document's annotations as name.annotations.json. */
+  const saveAnnotationsFile = useCallback(
+    async (folder?: string): Promise<void> => {
+      const base = fileName.replace(/\.[^.]+$/, '').replace(/-clean$/, '')
+      const r = await window.api.exportText({
+        text: JSON.stringify(exportAnnotations(content, fileName), null, 2),
+        suggestedName: `${base}.annotations.json`,
+        folder: folder ?? (filePath ? await window.api.dirname(filePath) : undefined),
+        title: 'Save annotations'
+      })
+      if (r.ok) flash('Annotations saved. Load them onto any copy with File > Load annotations…')
+    },
+    [content, fileName, filePath, flash]
+  )
+
+  /** Places the annotations in an annotations file onto this document. */
+  const loadAnnotationsText = useCallback(
+    async (text: string, name: string): Promise<void> => {
+      let file
+      try {
+        file = parseAnnotationsFile(text)
+      } catch (err) {
+        flash(String((err as Error).message ?? err))
+        return
+      }
+      const r = importAnnotations(content, file)
+      if (r.placed) commitContent(r.source, `Load annotations (${r.placed})`)
+      const { summary, detail } = describeImport(r, name)
+      if (detail) await window.api.message({ type: r.notPlaced.length ? 'warning' : 'info', title: 'Load annotations', message: summary, detail })
+      else flash(summary)
+    },
+    [commitContent, content, flash]
+  )
+
   const handleAction = useCallback(
     async (action: string, payload?: unknown) => {
       switch (action) {
@@ -705,7 +781,50 @@ export default function App(): React.JSX.Element {
             text: removeAllAnnotations(content),
             suggestedName: fileName
           })
-          if (r.ok) flash('Clean Markdown exported.')
+          if (!r.ok) return
+          flash('Clean Markdown exported.')
+          // The annotations need not be lost: offer to keep them beside it,
+          // ready for File > Load annotations… on this or any copy.
+          if (annotations.length) {
+            const keep = await window.api.confirm({
+              title: 'Save the annotations separately?',
+              message: `Save this document's ${annotations.length} annotation${annotations.length === 1 ? '' : 's'} in a separate file?`,
+              detail:
+                'An annotations file (.annotations.json) can be loaded back onto the clean copy, or any copy of this ' +
+                'document, with File > Load annotations…, and they land on the same words.'
+            })
+            if (keep) await saveAnnotationsFile(r.filePath ? await window.api.dirname(r.filePath) : undefined)
+          }
+          return
+        }
+        case 'file:export:annotations':
+          if (!annotations.length) {
+            flash('This document has no annotations to export.')
+            return
+          }
+          await saveAnnotationsFile()
+          return
+        case 'file:export:annotationSummary': {
+          if (!annotations.length) {
+            flash('This document has no annotations to summarise.')
+            return
+          }
+          const base = fileName.replace(/\.[^.]+$/, '')
+          const r = await window.api.exportText({
+            text: annotationSummary(exportAnnotations(content, fileName)),
+            suggestedName: `${base} - annotations.md`,
+            title: 'Export annotation summary'
+          })
+          if (r.ok) flash('Annotation summary saved.')
+          return
+        }
+        case 'file:importAnnotations': {
+          const picked = await window.api.pickAnnotations(filePath ? { folder: await window.api.dirname(filePath) } : undefined)
+          if (!picked.ok || !picked.content) {
+            if (picked.error) flash(picked.error)
+            return
+          }
+          await loadAnnotationsText(picked.content, picked.name ?? 'the file')
           return
         }
         case 'file:print': {
@@ -945,6 +1064,9 @@ export default function App(): React.JSX.Element {
       activeId,
       annotate,
       annotations.length,
+      saveAnnotationsFile,
+      loadAnnotationsText,
+      filePath,
       buildStandalone,
       commitContent,
       content,

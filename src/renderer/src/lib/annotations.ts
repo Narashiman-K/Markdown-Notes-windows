@@ -45,6 +45,8 @@ export interface AnnotationInput {
   note?: string
   author?: string
   id?: string
+  /** When it was made; now, unless re-imported (annotationTransfer.ts). */
+  at?: string
 }
 
 export function openTag(input: AnnotationInput, id: string): string {
@@ -56,7 +58,7 @@ export function openTag(input: AnnotationInput, id: string): string {
     input.color ? `data-mn-color="${escapeAttr(input.color)}"` : '',
     input.note ? `data-mn-note="${escapeAttr(input.note)}"` : '',
     input.author ? `data-mn-author="${escapeAttr(input.author)}"` : '',
-    `data-mn-at="${new Date().toISOString()}"`
+    `data-mn-at="${escapeAttr(input.at ?? new Date().toISOString())}"`
   ]
     .filter(Boolean)
     .join(' ')
@@ -163,9 +165,9 @@ export function applyAnnotation(source: string, start: number, end: number, inpu
 
 /* -------------------------------------------------------------- removal */
 
-const TAG_NAMES = ['mark', 'u', 's', 'strong', 'em', 'span']
+export const TAG_NAMES = ['mark', 'u', 's', 'strong', 'em', 'span']
 
-function findMatchingClose(source: string, tagName: string, from: number): [number, number] | null {
+export function findMatchingClose(source: string, tagName: string, from: number): [number, number] | null {
   const re = new RegExp(`<(/?)${tagName}\\b[^>]*>`, 'gi')
   re.lastIndex = from
   let depth = 1

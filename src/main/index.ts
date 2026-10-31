@@ -597,6 +597,62 @@ function registerIpc(): void {
     }
   })
 
+  /*
+   * Annotations files (.annotations.json) and annotation summaries (.md):
+   * saved where the user chooses, by default beside the document or the
+   * clean copy just exported.
+   */
+  handle('file:exportText', async (_e, args: { text: string; suggestedName: string; folder?: string; title?: string }) => {
+    const json = /\.json$/i.test(args.suggestedName)
+    const r = await dialog.showSaveDialog(currentWindow()!, {
+      title: args.title ?? 'Export',
+      defaultPath:
+        args.folder && existsSync(args.folder) ? join(args.folder, basename(args.suggestedName)) : inLastFolder(args.suggestedName),
+      filters: json ? [{ name: 'Annotations', extensions: ['json'] }] : MD_FILTERS
+    })
+    if (r.canceled || !r.filePath) return { ok: false, canceled: true }
+    rememberFolder(r.filePath)
+    try {
+      await fsp.writeFile(r.filePath, args.text, 'utf8')
+      return { ok: true, filePath: r.filePath }
+    } catch (err) {
+      return { ok: false, error: String((err as Error).message ?? err) }
+    }
+  })
+
+  handle('dialog:pickAnnotations', async (_e, opts?: { folder?: string }) => {
+    const r = await dialog.showOpenDialog(currentWindow()!, {
+      title: 'Load annotations',
+      defaultPath: opts?.folder && existsSync(opts.folder) ? opts.folder : lastFolder(),
+      properties: ['openFile'],
+      filters: [{ name: 'Annotations', extensions: ['json'] }]
+    })
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+    try {
+      const stat = await fsp.stat(r.filePaths[0])
+      if (stat.size > 20 * 1024 * 1024) return { ok: false, error: 'That file is too large to be an annotations file.' }
+      return { ok: true, name: basename(r.filePaths[0]), content: await fsp.readFile(r.filePaths[0], 'utf8') }
+    } catch (err) {
+      return { ok: false, error: String((err as Error).message ?? err) }
+    }
+  })
+
+  /** An annotations file saved beside a document ("report.annotations.json" for "report.md"). */
+  handle('file:annotationsBeside', async (_e, filePath: string) => {
+    const base = filePath.replace(/\.[^.\\/]+$/, '')
+    for (const candidate of [`${base}.annotations.json`, `${filePath}.annotations.json`]) {
+      try {
+        const stat = await fsp.stat(candidate)
+        if (stat.isFile() && stat.size <= 20 * 1024 * 1024) {
+          return { name: basename(candidate), content: await fsp.readFile(candidate, 'utf8') }
+        }
+      } catch {
+        /* not there */
+      }
+    }
+    return null
+  })
+
   handle('file:exportPdf', async (_e, args: { html: string; suggestedName: string }) => {
     const r = await dialog.showSaveDialog(currentWindow()!, {
       title: 'Export as PDF',
@@ -878,6 +934,10 @@ function registerIpc(): void {
   })
 
   handle('dialog:confirm', async (_e, args: { title: string; message: string; detail?: string }) => {
+    // The test harness cannot click. It accepts loading annotations found
+    // beside a document (smoke test 18) and declines everything else, as
+    // closing the question would.
+    if (harness) return args.title === 'Annotations found'
     const r = await dialog.showMessageBox(currentWindow()!, {
       type: 'question',
       buttons: ['Yes', 'No'],

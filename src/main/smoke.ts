@@ -750,6 +750,35 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
     }
 
     /*
+     * 18 — annotations kept beside a document. Opening "report.md" with a
+     * "report.annotations.json" next to it offers to load them (answered
+     * Yes here), and they land on the same words.
+     */
+    mark('annotations beside the document')
+    {
+      const doc = join(outDir, 'sidecar-check.md')
+      writeFileSync(doc, '# Sidecar check\n\nRevenue rose across every region, led by the north.\n', 'utf8')
+      writeFileSync(
+        join(outDir, 'sidecar-check.annotations.json'),
+        JSON.stringify({
+          format: 'suprasuta-annotations',
+          version: 1,
+          document: 'sidecar-check.md',
+          exportedAt: '2026-10-31T10:00:00.000Z',
+          textLength: 70,
+          annotations: [
+            { id: 'aSmokeSide1', type: 'highlight', color: 'yellow', note: 'From the sidecar', exact: 'led by the north', prefix: 'every region, ', suffix: '.', position: 48 }
+          ]
+        }),
+        'utf8'
+      )
+      win.webContents.send('menu:action', { action: 'file:openPath', payload: doc })
+      await wait(2500)
+      const marked = await js<string>(`(() => { const m = document.querySelector('.markdown-body mark[data-mn-id="aSmokeSide1"]'); return m ? m.textContent + ' | ' + (m.getAttribute('data-mn-note') || '') : '' })()`)
+      check('annotations beside a document are offered and land on the same words', marked === 'led by the north | From the sidecar', marked || 'not placed')
+    }
+
+    /*
      * 17 — cloud storage folders. A folder added by hand (as File > Add a
      * cloud folder… does) appears under File > Cloud storage, and a document
      * inside it shows the cloud's name in the status bar.
