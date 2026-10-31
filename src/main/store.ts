@@ -43,6 +43,8 @@ export interface Settings {
   keepPageImages: boolean
   /** The folder a file dialog last used; dialogs open there (Electron 43+ would pick Downloads). */
   lastDialogDir?: string
+  /** Where a .md opened from Explorer goes while the app is running. */
+  openFromExplorer: 'ask' | 'new' | 'here'
 }
 
 const DEFAULTS: Settings = {
@@ -60,7 +62,8 @@ const DEFAULTS: Settings = {
   blockTints: ['codeBlock', 'blockquote'],
   reader: { width: 'medium', size: 'normal', spacing: 'normal', palette: 'auto' },
   ocrLanguages: ['eng'],
-  keepPageImages: false
+  keepPageImages: false,
+  openFromExplorer: 'ask'
 }
 
 let cache: Settings | null = null

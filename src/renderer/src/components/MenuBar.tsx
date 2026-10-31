@@ -44,7 +44,11 @@ interface Props {
   pageView?: boolean
   /** Ticks View > Original page pictures. */
   scansShown?: boolean
+  /** Ticks the File menu's choice for files opened from Explorer. */
+  openMode?: OpenMode
 }
+
+type OpenMode = 'ask' | 'new' | 'here'
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() ?? p
 const dirname = (p: string): string => {
@@ -53,7 +57,7 @@ const dirname = (p: string): string => {
   return parts.join('\\') || p
 }
 
-function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, scansShown: boolean): Menu[] {
+function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, scansShown: boolean, openMode: OpenMode): Menu[] {
   /*
    * Recent files are listed inline rather than in a submenu. The native menu
    * nested them, but one level of nesting for a list this short buys nothing
@@ -80,6 +84,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
       label: 'File',
       items: [
         { label: 'New', action: 'file:new', accelerator: 'Ctrl+N' },
+        { label: 'New window', action: 'file:newWindow', accelerator: 'Ctrl+Shift+N' },
         { label: 'Open…', action: 'file:open', accelerator: 'Ctrl+O' },
         { separator: true, label: '' },
         ...recent,
@@ -96,6 +101,12 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
         { label: 'Converter settings…', action: 'convert:settings' },
         { separator: true, label: '' },
         { label: 'Print…', action: 'file:print', accelerator: 'Ctrl+P' },
+        { separator: true, label: '' },
+        // Where a .md double-clicked in Explorer opens while the app is running.
+        { label: 'Files opened from Explorer', heading: true },
+        { label: 'Ask each time', action: 'file:openMode:ask', checked: openMode === 'ask' },
+        { label: 'Always in a new window', action: 'file:openMode:new', checked: openMode === 'new' },
+        { label: 'Always in this window', action: 'file:openMode:here', checked: openMode === 'here' },
         { separator: true, label: '' },
         { label: 'Exit', action: 'os:quit', accelerator: 'Alt+F4' }
       ]
@@ -221,7 +232,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
   ]
 }
 
-export default function MenuBar({ onAction, recentFiles, theme, pageView = false, scansShown = false }: Props): React.JSX.Element {
+export default function MenuBar({ onAction, recentFiles, theme, pageView = false, scansShown = false, openMode = 'ask' }: Props): React.JSX.Element {
   const [open, setOpen] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -283,7 +294,7 @@ export default function MenuBar({ onAction, recentFiles, theme, pageView = false
     onAction(action)
   }
 
-  const all = menus(recentFiles, theme, pageView, scansShown)
+  const all = menus(recentFiles, theme, pageView, scansShown, openMode)
 
   return (
     <div className="menubar" ref={ref}>

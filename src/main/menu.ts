@@ -30,6 +30,7 @@ export function buildMenu(win: BrowserWindow, send: Send): void {
       label: '&File',
       submenu: [
         { label: 'New', accelerator: 'CmdOrCtrl+N', click: () => send('file:new') },
+        { label: 'New window', accelerator: 'CmdOrCtrl+Shift+N', click: () => send('file:newWindow') },
         { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: () => send('file:open') },
         { label: 'Open Recent', submenu: recent },
         { type: 'separator' },

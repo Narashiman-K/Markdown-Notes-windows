@@ -126,6 +126,8 @@ export default function App(): React.JSX.Element {
   // not have to tick Kannada every time.
   const [ocrLanguages, setOcrLanguages] = useState<string[]>(['eng'])
   const [keepPageImages, setKeepPageImages] = useState(false)
+  /** File menu: where a .md opened from Explorer goes (main/index.ts chooseWhereToOpen). */
+  const [openMode, setOpenMode] = useState<'ask' | 'new' | 'here'>('ask')
   const changeKeepPageImages = useCallback((keep: boolean) => {
     setKeepPageImages(keep)
     void window.api.setSettings({ keepPageImages: keep })
@@ -396,7 +398,8 @@ export default function App(): React.JSX.Element {
         setDirty(false)
         const base = await window.api.basename(r.filePath)
         setFileName(base)
-        setMode('view')
+        // Stay where you are. Saving used to switch to View mode, so after
+        // every save you had to go back to Edit and find your place again.
         flash(`Saved ${base}`)
         return true
       }
@@ -575,6 +578,18 @@ export default function App(): React.JSX.Element {
       switch (action) {
         case 'file:new':
           return doNew()
+        case 'file:newWindow':
+          void window.api.newWindow()
+          return
+        case 'file:openMode:ask':
+        case 'file:openMode:new':
+        case 'file:openMode:here': {
+          const mode = action.split(':')[2] as 'ask' | 'new' | 'here'
+          setOpenMode(mode)
+          void window.api.setSettings({ openFromExplorer: mode })
+          flash(mode === 'ask' ? 'Files from Explorer: you will be asked each time.' : mode === 'new' ? 'Files from Explorer open in a new window.' : 'Files from Explorer open in this window.')
+          return
+        }
         case 'file:open':
           return doOpen()
         case 'file:openPath':
@@ -931,6 +946,7 @@ export default function App(): React.JSX.Element {
       if (Array.isArray(s?.blockTints)) setBlockTints(s.blockTints as BlockKind[])
       setOcrLanguages(normaliseOcrLanguages(s?.ocrLanguages))
       setKeepPageImages(s?.keepPageImages === true)
+      if (s?.openFromExplorer) setOpenMode(s.openFromExplorer)
       if (s?.reader) setReader({ ...DEFAULT_READER, ...(s.reader as Partial<ReaderSettings>) })
     })
 
@@ -1055,6 +1071,7 @@ export default function App(): React.JSX.Element {
         theme={theme}
         pageView={pageView}
         scansShown={docHasScans && showScans}
+        openMode={openMode}
       />
       <Toolbar
         mode={mode}

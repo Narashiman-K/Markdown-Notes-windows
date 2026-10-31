@@ -3,6 +3,7 @@ import { join, basename, dirname, extname, isAbsolute, normalize, sep } from 'no
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { promises as fsp, watch as fsWatch, existsSync, rmSync, type FSWatcher } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { buildMenu } from './menu'
 import { getSettings, setSettings, addRecent, clearRecent } from './store'
 import * as ai from './ai'
@@ -15,9 +16,40 @@ const isDev = !app.isPackaged
 /** Where the app's own pages are served from in a built app (registerAppProtocol). */
 const APP_SCHEME = 'suprasuta'
 const APP_HOST = 'app'
-let mainWindow: BrowserWindow | null = null
-let watcher: FSWatcher | null = null
+/*
+ * Several windows, one per open document, all in this one process.
+ *
+ * Until November 2026 there was a single window, and opening a .md file from
+ * Explorer while the app was running loaded it into that window straight
+ * away, without asking about unsaved changes: whatever was being edited was
+ * lost. Now each window is its own document, the user chooses where a file
+ * from Explorer opens (chooseWhereToOpen), and everything below that used to
+ * mean "the window" now means the window that asked.
+ */
+const windows = new Set<BrowserWindow>()
+let lastFocused: BrowserWindow | null = null
+/** The window whose request is being handled, for code reached from IPC. */
+const senderWindow = new AsyncLocalStorage<BrowserWindow | null>()
+
+/**
+ * The window an action is for: the one whose request is being handled, else
+ * the focused document window, else the one used last.
+ */
+function currentWindow(): BrowserWindow | null {
+  const fromIpc = senderWindow.getStore()
+  if (fromIpc && !fromIpc.isDestroyed()) return fromIpc
+  const focused = BrowserWindow.getFocusedWindow()
+  if (focused && windows.has(focused)) return focused
+  if (lastFocused && !lastFocused.isDestroyed()) return lastFocused
+  return [...windows][0] ?? null
+}
+
+/** Per window (by id): the file it shows, its watcher, a file waiting to load. */
+const windowFiles = new Map<number, string>()
+const watchers = new Map<number, FSWatcher>()
+const pendingOpen = new Map<number, string>()
 let pendingOpenPath: string | null = null
+let harnessStarted = false
 /** In-flight transcription jobs, so the UI can cancel a long one. */
 const transcribeJobs = new Map<string, AbortController>()
 
@@ -140,15 +172,19 @@ function hardenSessions(): void {
 
 /* ------------------------------------------------------------------ window */
 
-function createWindow(): void {
+function createWindow(openPath?: string): BrowserWindow {
   const s = getSettings()
   const b = s.windowBounds
 
-  mainWindow = new BrowserWindow({
+  // A new window opens a little down and right of the one in front.
+  const front = windows.size ? currentWindow() : null
+  const offset = front ? front.getBounds() : null
+
+  const win = new BrowserWindow({
     width: b?.width ?? 1280,
     height: b?.height ?? 860,
-    x: b?.x,
-    y: b?.y,
+    x: offset ? offset.x + 32 : b?.x,
+    y: offset ? offset.y + 32 : b?.y,
     minWidth: 640,
     minHeight: 480,
     show: false,
@@ -171,12 +207,22 @@ function createWindow(): void {
     }
   })
 
-  if (b?.maximized) mainWindow.maximize()
+  const winId = win.id
+  const isFirstWindow = !harnessStarted
+  harnessStarted = true
+  windows.add(win)
+  lastFocused = win
+  win.on('focus', () => {
+    lastFocused = win
+  })
+  if (openPath) pendingOpen.set(winId, openPath)
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow?.show()
-    if (process.env['MARKNOTE_SHOTS'] === '1' && mainWindow) {
-      const win = mainWindow
+  if (b?.maximized && !offset) win.maximize()
+
+  win.on('ready-to-show', () => {
+    win?.show()
+    // The test harnesses drive the first window only.
+    if (process.env['MARKNOTE_SHOTS'] === '1' && isFirstWindow) {
       import('./shots')
         .then((m) => m.runShots(win, join(app.getAppPath(), 'store-screenshots')))
         .catch((err) => {
@@ -185,8 +231,7 @@ function createWindow(): void {
         })
       return
     }
-    if (process.env['MARKNOTE_SMOKE'] === '1' && mainWindow) {
-      const win = mainWindow
+    if (process.env['MARKNOTE_SMOKE'] === '1' && isFirstWindow) {
       import('./smoke')
         .then((m) => m.runSmoke(win, join(app.getAppPath(), 'out', 'smoke')))
         .catch((err) => {
@@ -202,7 +247,7 @@ function createWindow(): void {
     // announces itself via 'renderer:ready' instead, and we flush it then.
   })
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) shell.openExternal(url)
     // One narrow exception to the http-only rule: the Store's own review
     // dialog for this exact product. Pinning the whole URL rather than the
@@ -229,46 +274,49 @@ function createWindow(): void {
       return false
     }
   }
-  mainWindow.webContents.on('will-navigate', (e, url) => {
+  win.webContents.on('will-navigate', (e, url) => {
     if (isHome(url)) return
     e.preventDefault()
     if (/^https?:/i.test(url)) shell.openExternal(url)
   })
-  mainWindow.webContents.on('will-redirect', (e, url) => {
+  win.webContents.on('will-redirect', (e, url) => {
     if (!isHome(url)) e.preventDefault()
   })
 
-  mainWindow.on('close', (e) => {
-    if (!mainWindow) return
-    const bounds = mainWindow.getNormalBounds()
+  win.on('close', (e) => {
+    if (!win) return
+    const bounds = win.getNormalBounds()
     setSettings({
       windowBounds: {
         width: bounds.width,
         height: bounds.height,
         x: bounds.x,
         y: bounds.y,
-        maximized: mainWindow.isMaximized()
+        maximized: win.isMaximized()
       }
     })
     // Ask the renderer whether it is safe to quit (unsaved changes prompt).
-    if (!(mainWindow as BrowserWindow & { __forceClose?: boolean }).__forceClose) {
+    if (!(win as BrowserWindow & { __forceClose?: boolean }).__forceClose) {
       e.preventDefault()
-      mainWindow.webContents.send('app:before-close')
+      win.webContents.send('app:before-close')
     }
   })
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
-    stopWatching()
+  win.on('closed', () => {
+    windows.delete(win)
+    if (lastFocused === win) lastFocused = null
+    stopWatchingId(winId)
+    windowFiles.delete(winId)
+    pendingOpen.delete(winId)
   })
 
   if (isDev && devUrl) {
-    mainWindow.loadURL(devUrl)
+    win.loadURL(devUrl)
   } else {
-    mainWindow.loadURL(`${APP_SCHEME}://${APP_HOST}/index.html`)
+    win.loadURL(`${APP_SCHEME}://${APP_HOST}/index.html`)
   }
 
-  buildMenu(mainWindow, (action, payload) => mainWindow?.webContents.send('menu:action', { action, payload }))
+  buildMenu(win, (action, payload) => currentWindow()?.webContents.send('menu:action', { action, payload }))
 
   /*
    * The native menu stays registered but its bar is hidden.
@@ -279,44 +327,27 @@ function createWindow(): void {
    * window draws its own menu instead, which is the part that could not be
    * styled and was too small to read.
    */
-  mainWindow.setMenuBarVisibility(false)
-
-  ipcMain.handle('app:command', (_e, name: string) => {
-    if (!mainWindow) return
-
-    /*
-     * Clipboard commands go through webContents, not document.execCommand.
-     * Chromium refuses execCommand('paste') for security, so the menu item
-     * did nothing while Ctrl+V worked - the accelerator was reaching the
-     * native handler that the menu item was not. These are the same
-     * operations the native menu roles performed.
-     */
-    if (name === 'cut') mainWindow.webContents.cut()
-    else if (name === 'copy') mainWindow.webContents.copy()
-    else if (name === 'paste') mainWindow.webContents.paste()
-    else if (name === 'selectAll') mainWindow.webContents.selectAll()
-    else if (name === 'fullscreen') mainWindow.setFullScreen(!mainWindow.isFullScreen())
-    else if (name === 'devtools') mainWindow.webContents.toggleDevTools()
-    else if (name === 'quit') mainWindow.close()
-    else if (name === 'clearRecent') {
-      // The hidden native menu still lists them, so it is rebuilt too.
-      clearRecent()
-      buildMenu(mainWindow, (a, p2) => mainWindow?.webContents.send('menu:action', { action: a, payload: p2 }))
-    }
-  })
+  win.setMenuBarVisibility(false)
+  return win
 }
 
 function send(channel: string, payload?: unknown): void {
-  mainWindow?.webContents.send(channel, payload)
+  currentWindow()?.webContents.send(channel, payload)
 }
 
-async function openPathInRenderer(filePath: string): Promise<void> {
+/**
+ * Loads a file into a window that has nothing to lose: a new window, or the
+ * first one at start-up. Any other window goes through the renderer's own
+ * open path (menu action file:openPath), which asks about unsaved changes.
+ */
+async function openPathInRenderer(filePath: string, win = currentWindow()): Promise<void> {
+  if (!win) return
   try {
     const content = await fsp.readFile(filePath, 'utf8')
     addRecent(filePath)
-    if (mainWindow) buildMenu(mainWindow, (a, p) => mainWindow?.webContents.send('menu:action', { action: a, payload: p }))
-    watchFile(filePath)
-    send('file:opened', { filePath, content })
+    buildMenu(win, (a, p) => currentWindow()?.webContents.send('menu:action', { action: a, payload: p }))
+    watchFile(filePath, win)
+    win.webContents.send('file:opened', { filePath, content })
   } catch (err) {
     dialog.showErrorBox('Could not open file', String((err as Error).message ?? err))
   }
@@ -353,7 +384,8 @@ async function readOrOfferConversion(filePath: string): Promise<{
   try {
     const content = await fsp.readFile(filePath, 'utf8')
     addRecent(filePath)
-    if (mainWindow) buildMenu(mainWindow, (a, p) => send('menu:action', { action: a, payload: p }))
+    const owner = currentWindow()
+    if (owner) buildMenu(owner, (a, p) => send('menu:action', { action: a, payload: p }))
     watchFile(filePath)
     const indented = /^([ ]{4}|\t)\S/m.test(content)
     return {
@@ -372,23 +404,36 @@ async function readOrOfferConversion(filePath: string): Promise<{
 
 /* ----------------------------------------------------------------- watcher */
 
-function stopWatching(): void {
+function stopWatchingId(id: number): void {
   try {
-    watcher?.close()
+    watchers.get(id)?.close()
   } catch {
     /* ignore */
   }
-  watcher = null
+  watchers.delete(id)
 }
 
-function watchFile(filePath: string): void {
-  stopWatching()
+function stopWatching(win = currentWindow()): void {
+  if (win) stopWatchingId(win.id)
+}
+
+/** Watches the file a window shows, and tells that window when it changes. */
+function watchFile(filePath: string, win = currentWindow()): void {
+  if (!win) return
+  const id = win.id
+  stopWatchingId(id)
+  windowFiles.set(id, filePath)
   try {
     let timer: NodeJS.Timeout | null = null
-    watcher = fsWatch(filePath, () => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => send('file:changed-on-disk', { filePath }), 250)
-    })
+    watchers.set(
+      id,
+      fsWatch(filePath, () => {
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => {
+          if (!win.isDestroyed()) win.webContents.send('file:changed-on-disk', { filePath })
+        }, 250)
+      })
+    )
   } catch {
     /* file may be on a volume that does not support watching */
   }
@@ -443,8 +488,18 @@ function inLastFolder(name: string): string {
 }
 
 function registerIpc(): void {
-  ipcMain.handle('dialog:open', async () => {
-    const r = await dialog.showOpenDialog(mainWindow!, {
+  /*
+   * Every IPC handler runs with the window that sent it as currentWindow(),
+   * so dialogs open over that window and files are watched for it, even when
+   * another window has the focus (an autosave in a window behind, say).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handle = (channel: string, fn: (e: IpcMainInvokeEvent, ...args: any[]) => unknown): void => {
+    ipcMain.handle(channel, (e, ...args) => senderWindow.run(BrowserWindow.fromWebContents(e.sender), () => fn(e, ...args)))
+  }
+
+  handle('dialog:open', async () => {
+    const r = await dialog.showOpenDialog(currentWindow()!, {
       title: 'Open document',
       defaultPath: lastFolder(),
       properties: ['openFile'],
@@ -459,14 +514,14 @@ function registerIpc(): void {
     return readOrOfferConversion(r.filePaths[0])
   })
 
-  ipcMain.handle('file:read', async (_e: IpcMainInvokeEvent, filePath: string) =>
+  handle('file:read', async (_e: IpcMainInvokeEvent, filePath: string) =>
     readOrOfferConversion(filePath)
   )
 
-  ipcMain.handle('file:save', async (_e, args: { filePath: string | null; content: string; saveAs?: boolean }) => {
+  handle('file:save', async (_e, args: { filePath: string | null; content: string; saveAs?: boolean }) => {
     let target = args.filePath
     if (!target || args.saveAs) {
-      const r = await dialog.showSaveDialog(mainWindow!, {
+      const r = await dialog.showSaveDialog(currentWindow()!, {
         title: args.saveAs ? 'Save a copy as' : 'Save Markdown file',
         defaultPath: target ?? join(lastFolder(), 'Untitled.md'),
         filters: MD_FILTERS
@@ -480,7 +535,8 @@ function registerIpc(): void {
       stopWatching()
       await fsp.writeFile(target, args.content, 'utf8')
       addRecent(target)
-      if (mainWindow) buildMenu(mainWindow, (a, p) => send('menu:action', { action: a, payload: p }))
+      const owner = currentWindow()
+    if (owner) buildMenu(owner, (a, p) => send('menu:action', { action: a, payload: p }))
       watchFile(target)
       return { ok: true, filePath: target }
     } catch (err) {
@@ -488,8 +544,8 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('file:exportHtml', async (_e, args: { html: string; suggestedName: string }) => {
-    const r = await dialog.showSaveDialog(mainWindow!, {
+  handle('file:exportHtml', async (_e, args: { html: string; suggestedName: string }) => {
+    const r = await dialog.showSaveDialog(currentWindow()!, {
       title: 'Export as HTML',
       defaultPath: inLastFolder(args.suggestedName.replace(/\.[^.]+$/, '') + '.html'),
       filters: [{ name: 'HTML', extensions: ['html'] }]
@@ -504,8 +560,8 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('file:exportMarkdown', async (_e, args: { text: string; suggestedName: string }) => {
-    const r = await dialog.showSaveDialog(mainWindow!, {
+  handle('file:exportMarkdown', async (_e, args: { text: string; suggestedName: string }) => {
+    const r = await dialog.showSaveDialog(currentWindow()!, {
       title: 'Export Markdown without annotations',
       defaultPath: inLastFolder(args.suggestedName.replace(/\.[^.]+$/, '') + '-clean.md'),
       filters: MD_FILTERS
@@ -520,8 +576,8 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('file:exportPdf', async (_e, args: { html: string; suggestedName: string }) => {
-    const r = await dialog.showSaveDialog(mainWindow!, {
+  handle('file:exportPdf', async (_e, args: { html: string; suggestedName: string }) => {
+    const r = await dialog.showSaveDialog(currentWindow()!, {
       title: 'Export as PDF',
       defaultPath: inLastFolder(args.suggestedName.replace(/\.[^.]+$/, '') + '.pdf'),
       filters: [{ name: 'PDF', extensions: ['pdf'] }]
@@ -572,7 +628,7 @@ function registerIpc(): void {
    * print to happen, keeps the renderer out of it: from here on the user is
    * dealing with the preview window and may well decide not to print at all.
    */
-  ipcMain.handle('file:print', async (_e, args: { html: string; title?: string }) => {
+  handle('file:print', async (_e, args: { html: string; title?: string }) => {
     let layout: BrowserWindow | null = null
     let pdfPath: string | null = null
     try {
@@ -594,7 +650,7 @@ function registerIpc(): void {
       const preview = new BrowserWindow({
         width: 900,
         height: 1000,
-        parent: mainWindow ?? undefined,
+        parent: currentWindow() ?? undefined,
         title: `Print preview — ${args.title ?? 'Document'}`,
         autoHideMenuBar: true,
         webPreferences: { plugins: true }
@@ -621,9 +677,9 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('find:start', (_e, args: { text: string; forward?: boolean; findNext?: boolean }) => {
+  handle('find:start', (_e, args: { text: string; forward?: boolean; findNext?: boolean }) => {
     if (!args.text) return { ok: false }
-    mainWindow?.webContents.findInPage(args.text, {
+    currentWindow()?.webContents.findInPage(args.text, {
       forward: args.forward ?? true,
       findNext: args.findNext ?? false,
       matchCase: false
@@ -631,12 +687,12 @@ function registerIpc(): void {
     return { ok: true }
   })
 
-  ipcMain.handle('find:stop', () => {
-    mainWindow?.webContents.stopFindInPage('clearSelection')
+  handle('find:stop', () => {
+    currentWindow()?.webContents.stopFindInPage('clearSelection')
     return { ok: true }
   })
 
-  ipcMain.handle('settings:get', () => {
+  handle('settings:get', () => {
     // Never hand raw credentials to the renderer; expose presence only.
     const s = getSettings()
     return {
@@ -649,7 +705,7 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('settings:set', (_e, patch: Record<string, unknown>) => {
+  handle('settings:set', (_e, patch: Record<string, unknown>) => {
     // Guard against the renderer overwriting stored keys with the placeholder.
     if (patch.aiKeys) delete patch.aiKeys
     return setSettings(patch)
@@ -657,11 +713,11 @@ function registerIpc(): void {
 
   /* ------------------------------------------------------------------ AI */
 
-  ipcMain.handle('ai:status', (_e, provider: ai.ProviderId) => ai.status(provider))
-  ipcMain.handle('ai:models', (_e, provider: ai.ProviderId) => ai.listModels(provider))
-  ipcMain.handle('ai:chat', (_e, req: ai.ChatRequest) => ai.chat(req))
+  handle('ai:status', (_e, provider: ai.ProviderId) => ai.status(provider))
+  handle('ai:models', (_e, provider: ai.ProviderId) => ai.listModels(provider))
+  handle('ai:chat', (_e, req: ai.ChatRequest) => ai.chat(req))
 
-  ipcMain.handle('ai:keyState', () => {
+  handle('ai:keyState', () => {
     const keys = getSettings().aiKeys
     return {
       encryption: secrets.isEncryptionAvailable(),
@@ -672,7 +728,7 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('ai:setKey', (_e, args: { provider: 'anthropic' | 'openai' | 'gemini' | 'assemblyai'; key: string }) => {
+  handle('ai:setKey', (_e, args: { provider: 'anthropic' | 'openai' | 'gemini' | 'assemblyai'; key: string }) => {
     const keys = { ...getSettings().aiKeys }
     keys[args.provider] = args.key ? secrets.seal(args.key.trim()) : ''
     setSettings({ aiKeys: keys })
@@ -681,8 +737,8 @@ function registerIpc(): void {
 
   /* ----------------------------------------------------------- converter */
 
-  ipcMain.handle('convert:pickInput', async () => {
-    const r = await dialog.showOpenDialog(mainWindow!, {
+  handle('convert:pickInput', async () => {
+    const r = await dialog.showOpenDialog(currentWindow()!, {
       title: 'Choose documents to convert to Markdown',
       defaultPath: lastFolder(),
       properties: ['openFile', 'multiSelections'],
@@ -700,7 +756,7 @@ function registerIpc(): void {
   })
 
   /** Raw bytes for the renderer-side converters. Arrives as a Uint8Array. */
-  ipcMain.handle('file:readBytes', async (_e, filePath: string) => {
+  handle('file:readBytes', async (_e, filePath: string) => {
     try {
       const data = await fsp.readFile(filePath)
       return { ok: true, bytes: new Uint8Array(data), name: basename(filePath) }
@@ -709,7 +765,7 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('file:writeText', async (_e, args: { filePath: string; text: string }) => {
+  handle('file:writeText', async (_e, args: { filePath: string; text: string }) => {
     try {
       await fsp.mkdir(dirname(args.filePath), { recursive: true })
       await fsp.writeFile(args.filePath, args.text, 'utf8')
@@ -719,13 +775,13 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('file:exists', (_e, filePath: string) => existsSync(filePath))
+  handle('file:exists', (_e, filePath: string) => existsSync(filePath))
 
   /**
    * Cloud OCR. Runs here so the Gemini key never reaches renderer code — the
    * same key the AI panel uses, stored encrypted.
    */
-  ipcMain.handle('ocr:cloud', async (_e, args: { bytes: Uint8Array; mimeType: string }) => {
+  handle('ocr:cloud', async (_e, args: { bytes: Uint8Array; mimeType: string }) => {
     const key = secrets.open(getSettings().aiKeys.gemini)
     if (!key) return { ok: false, code: 'NO_KEY', error: 'No Google Gemini API key has been saved.' }
     return ai.visionOcr(key, Buffer.from(args.bytes).toString('base64'), args.mimeType)
@@ -735,7 +791,7 @@ function registerIpc(): void {
    * Audio transcription. Cloud-only by necessity; progress is streamed back so
    * the user can see it is alive during a long job, and it can be cancelled.
    */
-  ipcMain.handle('transcribe:audio', async (_e, args: { bytes: Uint8Array; jobId: string }) => {
+  handle('transcribe:audio', async (_e, args: { bytes: Uint8Array; jobId: string }) => {
     const controller = new AbortController()
     transcribeJobs.set(args.jobId, controller)
     try {
@@ -749,14 +805,14 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle('transcribe:cancel', (_e, jobId: string) => {
+  handle('transcribe:cancel', (_e, jobId: string) => {
     transcribeJobs.get(jobId)?.abort()
     return { ok: true }
   })
 
-  ipcMain.handle('convert:pickOutput', async (_e, args: { suggestedName: string }) => {
+  handle('convert:pickOutput', async (_e, args: { suggestedName: string }) => {
     const dir = getSettings().convertDir
-    const r = await dialog.showSaveDialog(mainWindow!, {
+    const r = await dialog.showSaveDialog(currentWindow()!, {
       title: 'Save converted Markdown as',
       defaultPath: join(dir && existsSync(dir) ? dir : app.getPath('documents'), args.suggestedName),
       filters: [{ name: 'Markdown', extensions: ['md'] }]
@@ -767,8 +823,8 @@ function registerIpc(): void {
     return { ok: true, filePath: target, dir: dirname(target) }
   })
 
-  ipcMain.handle('convert:pickFolder', async () => {
-    const r = await dialog.showOpenDialog(mainWindow!, {
+  handle('convert:pickFolder', async () => {
+    const r = await dialog.showOpenDialog(currentWindow()!, {
       title: 'Choose the default folder for converted files',
       properties: ['openDirectory', 'createDirectory'],
       defaultPath: getSettings().convertDir ?? app.getPath('documents')
@@ -777,18 +833,18 @@ function registerIpc(): void {
     return { ok: true, dir: r.filePaths[0] }
   })
 
-  ipcMain.handle('convert:suggestDir', (_e, args: { input?: string }) => {
+  handle('convert:suggestDir', (_e, args: { input?: string }) => {
     const settings = getSettings()
     if (settings.convertDir && existsSync(settings.convertDir)) return settings.convertDir
     if (args?.input) return dirname(args.input)
     return app.getPath('documents')
   })
 
-  ipcMain.handle('dialog:confirmUnsaved', async (_e, args: { name: string }) => {
+  handle('dialog:confirmUnsaved', async (_e, args: { name: string }) => {
     // The test harness runs in a throwaway profile and cannot click a dialog;
     // a real one would stall the run. Its edits are never worth keeping.
     if (harness) return 'discard'
-    const r = await dialog.showMessageBox(mainWindow!, {
+    const r = await dialog.showMessageBox(currentWindow()!, {
       type: 'warning',
       buttons: ['Save', "Don't Save", 'Cancel'],
       defaultId: 0,
@@ -800,8 +856,8 @@ function registerIpc(): void {
     return ['save', 'discard', 'cancel'][r.response]
   })
 
-  ipcMain.handle('dialog:confirm', async (_e, args: { title: string; message: string; detail?: string }) => {
-    const r = await dialog.showMessageBox(mainWindow!, {
+  handle('dialog:confirm', async (_e, args: { title: string; message: string; detail?: string }) => {
+    const r = await dialog.showMessageBox(currentWindow()!, {
       type: 'question',
       buttons: ['Yes', 'No'],
       defaultId: 1,
@@ -813,8 +869,8 @@ function registerIpc(): void {
     return r.response === 0
   })
 
-  ipcMain.handle('dialog:message', async (_e, args: { type?: string; title: string; message: string; detail?: string }) => {
-    await dialog.showMessageBox(mainWindow!, {
+  handle('dialog:message', async (_e, args: { type?: string; title: string; message: string; detail?: string }) => {
+    await dialog.showMessageBox(currentWindow()!, {
       type: (args.type as 'info') ?? 'info',
       title: args.title,
       message: args.message,
@@ -824,8 +880,8 @@ function registerIpc(): void {
     return true
   })
 
-  ipcMain.handle('dialog:pickImage', async () => {
-    const r = await dialog.showOpenDialog(mainWindow!, {
+  handle('dialog:pickImage', async () => {
+    const r = await dialog.showOpenDialog(currentWindow()!, {
       title: 'Insert image',
       defaultPath: lastFolder(),
       properties: ['openFile'],
@@ -841,16 +897,17 @@ function registerIpc(): void {
    * the command line — which is how Windows opens a .md by double-click — is
    * delivered now, when something is actually listening for it.
    */
-  ipcMain.handle('app:rendererReady', () => {
-    if (pendingOpenPath) {
-      const path = pendingOpenPath
-      pendingOpenPath = null
-      void openPathInRenderer(path)
+  handle('app:rendererReady', () => {
+    const win = currentWindow()
+    const path = win ? pendingOpen.get(win.id) : undefined
+    if (win && path) {
+      pendingOpen.delete(win.id)
+      void openPathInRenderer(path, win)
     }
     return { ok: true }
   })
 
-  ipcMain.handle('app:info', () => ({
+  handle('app:info', () => ({
     name: app.getName(),
     version: app.getVersion(),
     electron: process.versions.electron,
@@ -858,26 +915,114 @@ function registerIpc(): void {
     node: process.versions.node
   }))
 
-  ipcMain.handle('app:setTitle', (_e, args: { filePath: string | null; dirty: boolean }) => {
+  handle('app:setTitle', (_e, args: { filePath: string | null; dirty: boolean }) => {
     const name = args.filePath ? basename(args.filePath) : 'Untitled'
-    mainWindow?.setTitle(`${args.dirty ? '• ' : ''}${name} — ${APP_DISPLAY_NAME}`)
-    if (args.filePath) mainWindow?.setRepresentedFilename?.(args.filePath)
-    return true
-  })
-
-  ipcMain.handle('app:forceClose', () => {
-    if (mainWindow) {
-      ;(mainWindow as BrowserWindow & { __forceClose?: boolean }).__forceClose = true
-      mainWindow.close()
+    const win = currentWindow()
+    win?.setTitle(`${args.dirty ? '• ' : ''}${name} — ${APP_DISPLAY_NAME}`)
+    if (args.filePath) win?.setRepresentedFilename?.(args.filePath)
+    // Which file each window shows, so a file opened from Explorer that is
+    // already open just brings its window forward.
+    if (win) {
+      if (args.filePath) windowFiles.set(win.id, args.filePath)
+      else windowFiles.delete(win.id)
     }
     return true
   })
 
-  ipcMain.handle('path:dirname', (_e, p: string) => dirname(p))
-  ipcMain.handle('path:basename', (_e, p: string) => basename(p))
+  handle('app:forceClose', () => {
+    const w = currentWindow()
+    if (w) {
+      ;(w as BrowserWindow & { __forceClose?: boolean }).__forceClose = true
+      w.close()
+    }
+    return true
+  })
+
+  handle('path:dirname', (_e, p: string) => dirname(p))
+  handle('path:basename', (_e, p: string) => basename(p))
+
+  handle('app:command', (_e, name: string) => {
+    const w = currentWindow()
+    if (!w) return
+
+    /*
+     * Clipboard commands go through webContents, not document.execCommand.
+     * Chromium refuses execCommand('paste') for security, so the menu item
+     * did nothing while Ctrl+V worked - the accelerator was reaching the
+     * native handler that the menu item was not. These are the same
+     * operations the native menu roles performed.
+     */
+    if (name === 'cut') w.webContents.cut()
+    else if (name === 'copy') w.webContents.copy()
+    else if (name === 'paste') w.webContents.paste()
+    else if (name === 'selectAll') w.webContents.selectAll()
+    else if (name === 'fullscreen') w.setFullScreen(!w.isFullScreen())
+    else if (name === 'devtools') w.webContents.toggleDevTools()
+    else if (name === 'quit') w.close()
+    else if (name === 'clearRecent') {
+      // The hidden native menu still lists them, so it is rebuilt too.
+      clearRecent()
+      buildMenu(w, (a, p2) => currentWindow()?.webContents.send('menu:action', { action: a, payload: p2 }))
+    }
+  })
+
+  // File > New window (Ctrl+Shift+N): another document, side by side.
+  handle('app:newWindow', () => {
+    createWindow()
+    return true
+  })
 }
 
 /* ------------------------------------------------------------- app lifecycle */
+
+const samePath = (a: string, b: string): boolean => normalize(a).toLowerCase() === normalize(b).toLowerCase()
+
+/** Where a file from Explorer should open: a new window, or the one in front. */
+async function chooseWhereToOpen(win: BrowserWindow, filePath: string): Promise<'new' | 'here' | 'cancel'> {
+  const remembered = getSettings().openFromExplorer
+  if (remembered === 'new' || remembered === 'here') return remembered
+  const r = await dialog.showMessageBox(win, {
+    type: 'question',
+    title: 'Open document',
+    message: `Open “${basename(filePath)}”`,
+    detail:
+      'In a new window, so you can keep both documents open side by side, or in this window instead of the ' +
+      'current document (you will be asked about any unsaved changes first).',
+    buttons: ['New window', 'This window', 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+    checkboxLabel: 'Remember my choice (change it later under File)'
+  })
+  const choice = (['new', 'here', 'cancel'] as const)[r.response]
+  if (r.checkboxChecked && choice !== 'cancel') setSettings({ openFromExplorer: choice })
+  return choice
+}
+
+async function openFromOutside(filePath: string | null): Promise<void> {
+  if (!filePath) {
+    createWindow()
+    return
+  }
+  for (const w of windows) {
+    const shown = windowFiles.get(w.id)
+    if (shown && samePath(shown, filePath)) {
+      if (w.isMinimized()) w.restore()
+      w.focus()
+      return
+    }
+  }
+  const front = currentWindow()
+  if (!front) {
+    createWindow(filePath)
+    return
+  }
+  if (front.isMinimized()) front.restore()
+  front.focus()
+  const choice = await chooseWhereToOpen(front, filePath)
+  if (choice === 'new') createWindow(filePath)
+  else if (choice === 'here') front.webContents.send('menu:action', { action: 'file:openPath', payload: filePath })
+}
 
 function fileFromArgv(argv: string[]): string | null {
   const candidates = argv.slice(1).filter((a) => !a.startsWith('--') && /\.(md|markdown|mdown|mkd|mdx|txt)$/i.test(a))
@@ -907,18 +1052,21 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
+  /*
+   * Windows starts a second copy of the app for every .md double-clicked in
+   * Explorer while it is already running; that copy hands its arguments here
+   * and quits. The file opens where the user says (chooseWhereToOpen), never
+   * over a document with unsaved changes without asking. A file that is
+   * already open just brings its window forward. Started again with no file
+   * (from the Start menu, say), a new empty window opens, as Word does.
+   */
   app.on('second-instance', (_e, argv) => {
-    const f = fileFromArgv(argv)
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
-      if (f) openPathInRenderer(f)
-    }
+    void openFromOutside(fileFromArgv(argv))
   })
 
   app.on('open-file', (e, path) => {
     e.preventDefault()
-    if (mainWindow) openPathInRenderer(path)
+    if (app.isReady()) void openFromOutside(path)
     else pendingOpenPath = path
   })
 
@@ -932,10 +1080,12 @@ if (!gotLock) {
     registerAppProtocol()
     hardenSessions()
     registerIpc()
-    pendingOpenPath = fileFromArgv(process.argv)
-    createWindow()
+    createWindow(fileFromArgv(process.argv) ?? pendingOpenPath ?? undefined)
+    pendingOpenPath = null
 
-    nativeTheme.on('updated', () => send('theme:system-changed', nativeTheme.shouldUseDarkColors))
+    nativeTheme.on('updated', () => {
+      for (const w of windows) w.webContents.send('theme:system-changed', nativeTheme.shouldUseDarkColors)
+    })
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

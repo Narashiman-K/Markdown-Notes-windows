@@ -532,6 +532,29 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       check('navigating to a local file is refused', after === before, after)
     }
 
+    /*
+     * 13f — File > New window: a second document window opens with the app
+     * in it, and the first keeps its document.
+     */
+    mark('new window')
+    {
+      const firstTitle = win.getTitle()
+      const before = BrowserWindow.getAllWindows().length
+      win.webContents.send('menu:action', { action: 'file:newWindow' })
+      await wait(4000)
+      const others = BrowserWindow.getAllWindows().filter((w) => w !== win && w.getTitle().includes('Markdown Notes'))
+      const second = others[0]
+      check('File > New window opens a second window', BrowserWindow.getAllWindows().length === before + 1 && !!second, `${before} -> ${BrowserWindow.getAllWindows().length}`)
+      if (second) {
+        const loaded = await second.webContents.executeJavaScript(`!!document.querySelector('.markdown-body')`).catch(() => false)
+        check('the new window shows the app', loaded === true, String(loaded))
+        check('the first window keeps its document', win.getTitle() === firstTitle, win.getTitle())
+        ;(second as BrowserWindow & { __forceClose?: boolean }).__forceClose = true
+        second.close()
+        await wait(500)
+      }
+    }
+
     mark('spreadsheet worker')
     const xlsxPath = join(samples, 'sample.xlsx').replace(/\\/g, '\\\\')
     const sheetRaw = await jsWithTimeout<string>(

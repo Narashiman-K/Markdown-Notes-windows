@@ -84,6 +84,8 @@ const api = {
   appInfo: () => ipcRenderer.invoke('app:info'),
   setTitle: (args: { filePath: string | null; dirty: boolean }) => ipcRenderer.invoke('app:setTitle', args),
   forceClose: () => ipcRenderer.invoke('app:forceClose'),
+  /** File > New window: another document window. */
+  newWindow: () => ipcRenderer.invoke('app:newWindow'),
   dirname: (p: string) => ipcRenderer.invoke('path:dirname', p),
   basename: (p: string) => ipcRenderer.invoke('path:basename', p),
 
