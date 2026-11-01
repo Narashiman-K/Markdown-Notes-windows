@@ -89,8 +89,13 @@ export default function CompareView(props: Props): React.JSX.Element {
   /** A first document picked here instead of the open one; null = the open document. */
   const [leftFile, setLeftFile] = useState<LoadedSide | null>(null)
   const [leftSaved, setLeftSaved] = useState('')
-  /** The chooser is picking the first document rather than the one to compare with. */
-  const [pickingFirst, setPickingFirst] = useState(!props.leftText.trim())
+  /**
+   * How the user wants to compare: the open document with one more file
+   * ('open'), or two files loaded here ('two'); null = not chosen yet. With
+   * nothing in the open document there is only the second way.
+   */
+  const [mode, setMode] = useState<'open' | 'two' | null>(props.leftText.trim() ? null : 'two')
+  const [pending, setPending] = useState<{ first: LoadedSide | null; second: LoadedSide | null }>({ first: null, second: null })
   const [view, setView] = useState<View>('side')
   const [wholeEdit, setWholeEdit] = useState(false)
   const [current, setCurrent] = useState(0)
@@ -148,17 +153,13 @@ export default function CompareView(props: Props): React.JSX.Element {
     }
   }
 
-  const chooseFirst = async (source: CompareSource): Promise<void> => {
+  /** Two-files mode: loads one of the two slots; Compare starts once both are in. */
+  const loadSlot = async (slot: 'first' | 'second', source: CompareSource): Promise<void> => {
     setError(null)
     setLoading(source.label)
     try {
       const loaded = await source.load()
-      if (!loaded) return
-      const text = normaliseNewlines(loaded.text)
-      setLeftFile(loaded)
-      setLeftText(text)
-      setLeftSaved(text)
-      setPickingFirst(false)
+      if (loaded) setPending((p) => ({ ...p, [slot]: { ...loaded, text: normaliseNewlines(loaded.text) } }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -166,10 +167,18 @@ export default function CompareView(props: Props): React.JSX.Element {
     }
   }
 
-  const useOpenDocument = (): void => {
-    setLeftFile(null)
-    setLeftText(props.leftText)
-    setPickingFirst(false)
+  const startTwo = (): void => {
+    const { first, second } = pending
+    if (!first || !second) return
+    setLeftFile(first)
+    setLeftText(first.text)
+    setLeftSaved(first.text)
+    setRight(second)
+    setRightText(second.text)
+    setRightSaved(second.text)
+    setCurrent(0)
+    setExpanded(new Set())
+    setAi(null)
   }
 
   const goTo = useCallback(
@@ -247,6 +256,18 @@ export default function CompareView(props: Props): React.JSX.Element {
     props.onClose()
   }
 
+  /** Back to the start, after offering to save what was changed here. */
+  const restart = async (): Promise<void> => {
+    if (!(await settle('left')) || !(await settle('right'))) return
+    setRight(null)
+    setEditing(null)
+    setWholeEdit(false)
+    setLeftFile(null)
+    setLeftText(props.leftText)
+    setPending({ first: null, second: null })
+    setMode(props.leftText.trim() ? null : 'two')
+  }
+
   const leaveWholeEdit = (): void => {
     if (isOpenDoc && leftText !== props.leftText) props.onLeftChange(leftText, 'Compare: edited')
     setWholeEdit(false)
@@ -294,45 +315,91 @@ export default function CompareView(props: Props): React.JSX.Element {
   /* ------------------------------------------------------------- choose */
 
   if (!right) {
-    const list = sources ?? []
+    const fileSource = sources?.find((x) => x.id === 'file')
+    // Other places a document can come from: another window or tab, My
+    // documents, and (beside the open document only) its saved version.
+    const others = (sources ?? []).filter((x) => x.id !== 'file' && (mode === 'open' || x.id !== 'saved'))
+    const slot = (label: string, loaded: LoadedSide | null, pick: (src: CompareSource) => void): React.ReactNode => (
+      <div className="cmp-slot">
+        <div className="cmp-slot-row">
+          <button className="primary" disabled={!fileSource || !!loading} onClick={() => fileSource && pick(fileSource)}>
+            {label}
+          </button>
+          <span className={loaded ? 'cmp-slot-name' : 'muted small'}>{loaded ? `✓ ${loaded.name}` : 'No file loaded yet'}</span>
+        </div>
+        {others.length > 0 && (
+          <details className="cmp-others">
+            <summary className="small">Or take it from an open window, tab or saved document</summary>
+            {others.map((x) => (
+              <button
+                key={x.id}
+                className="compare-source"
+                disabled={!!loading}
+                onClick={(e) => {
+                  ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
+                  pick(x)
+                }}
+              >
+                <span>{x.label}</span>
+                {x.detail && <span className="muted small">{x.detail}</span>}
+              </button>
+            ))}
+          </details>
+        )}
+      </div>
+    )
+    const hasOpen = props.leftText.trim() !== ''
     return (
       <div className="modal-backdrop" data-mn-ignore onMouseDown={props.onClose}>
         <div className="modal compare-choose" onMouseDown={(e) => e.stopPropagation()}>
           <h3>Compare documents</h3>
-          <div className="cmp-step">
-            <div className="cmp-step-title">1. First document</div>
-            <div className="compare-first">
-              <span className="compare-first-name">
-                {pickingFirst ? <span className="muted">Choose below…</span> : <b>{leftName}</b>}
-                {!pickingFirst && <span className="muted small">{isOpenDoc ? ' (the open document)' : ''}</span>}
-              </span>
-              {(pickingFirst || !isOpenDoc) && props.leftText.trim() !== '' && (
-                <button className="cmp-mini" onClick={useOpenDocument}>Use the open document</button>
-              )}
-              {!pickingFirst && (
-                <button className="cmp-mini" onClick={() => setPickingFirst(true)}>Choose another…</button>
-              )}
-            </div>
-          </div>
-          <div className="cmp-step-title">{pickingFirst ? 'Choose the first document' : '2. Compare it with'}</div>
-          {!sources && !error && <Loader label="Looking for documents…" />}
-          {loading && <Loader label={`Opening ${loading}…`} />}
-          {sources && !loading && (
-            <div className="compare-sources">
-              {list
-                // The open document's saved version only makes sense beside it.
-                .filter((s) => !(s.id === 'saved' && (pickingFirst || !isOpenDoc)))
-                .map((s) => (
-                  <button key={s.id} className="compare-source" onClick={() => void (pickingFirst ? chooseFirst(s) : choose(s))}>
-                    <span>{s.label}</span>
-                    {s.detail && <span className="muted small">{s.detail}</span>}
-                  </button>
-                ))}
+          {!sources && !error && <Loader label="Getting ready…" />}
+
+          {sources && mode === null && (
+            <div className="cmp-modes">
+              <button className="cmp-mode" onClick={() => setMode('open')}>
+                <b>Compare the open document with another file</b>
+                <span className="muted small">{props.leftName} is the 1st file; you load the 2nd.</span>
+              </button>
+              <button className="cmp-mode" onClick={() => setMode('two')}>
+                <b>Load two new files to compare</b>
+                <span className="muted small">You load the 1st and the 2nd file. The open document is not touched.</span>
+              </button>
             </div>
           )}
+
+          {sources && mode === 'open' && (
+            <>
+              <div className="cmp-slot">
+                <div className="cmp-slot-row">
+                  <span className="cmp-slot-label">1st file</span>
+                  <span className="cmp-slot-name">✓ {props.leftName} <span className="muted small">(open document)</span></span>
+                </div>
+              </div>
+              <div className="cmp-slot-label">2nd file</div>
+              {slot('Load the 2nd file', null, (x) => void choose(x))}
+            </>
+          )}
+
+          {sources && mode === 'two' && (
+            <>
+              <div className="cmp-slot-label">1st file</div>
+              {slot('Load the 1st file', pending.first, (x) => void loadSlot('first', x))}
+              <div className="cmp-slot-label">2nd file</div>
+              {slot('Load the 2nd file', pending.second, (x) => void loadSlot('second', x))}
+            </>
+          )}
+
+          {loading && <Loader label={`Opening ${loading}…`} />}
           {error && <p className="error-text">{error}</p>}
           <div className="modal-actions">
+            {mode !== null && hasOpen && <button onClick={() => { setMode(null); setError(null) }}>← Back</button>}
             <button onClick={props.onClose}>Cancel</button>
+            {mode === 'two' && (
+              <button className="primary" disabled={!pending.first || !pending.second} onClick={startTwo}>
+                Compare
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -446,7 +513,7 @@ export default function CompareView(props: Props): React.JSX.Element {
               {(right.saveLabel ?? `Save ${names.right}`) + (leftFile?.save ? ' (right)' : '')}
             </button>
           )}
-          <button onClick={() => { setRight(null); setEditing(null); setWholeEdit(false) }} title="Compare with a different document">Change…</button>
+          <button onClick={() => void restart()} title="Start again with other files">Other files…</button>
           <button onClick={() => void close()}>Close</button>
         </div>
       </div>
