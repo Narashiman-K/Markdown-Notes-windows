@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Store screenshot generator. Runs only when MARKNOTE_SHOTS=1.
  *
  * Hand-captured screenshots pick up stray hover tooltips and whatever window
@@ -6,9 +6,10 @@
  * scenario at a fixed 1920x1080, moves the pointer out of the way, and captures
  * clean frames — reproducible, and correctly sized for the Microsoft Store.
  */
-import { app, type BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
+import { tmpdir } from 'node:os'
 import { promises as fsp } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -38,7 +39,10 @@ export async function runShots(win: BrowserWindow, outDir: string): Promise<void
     const demo = join(app.getAppPath(), 'samples', 'demo.md').replace(/\\/g, '\\\\')
 
     /* 1 — the core idea: a real document, annotated, with the panel open */
-    win.webContents.send('menu:action', { action: 'file:openPath', payload: join(app.getAppPath(), 'samples', 'demo.md') })
+    // A copy, so AutoSave writes the annotations into it, not into the sample.
+    const demoCopy = join(tmpdir(), 'demo.md')
+    await fsp.copyFile(join(app.getAppPath(), 'samples', 'demo.md'), demoCopy)
+    win.webContents.send('menu:action', { action: 'file:openPath', payload: demoCopy })
     await wait(2000)
 
     // Annotate several passages the way a reader actually would.
@@ -97,6 +101,7 @@ export async function runShots(win: BrowserWindow, outDir: string): Promise<void
     await wait(600)
 
     /* 5 — AI panel with a genuine answer and citations */
+    if (process.env['MARKNOTE_SHOTS_NO_AI'] !== '1') {
     win.webContents.send('menu:action', { action: 'ai:toggle' })
     await wait(1500)
 
@@ -104,7 +109,7 @@ export async function runShots(win: BrowserWindow, outDir: string): Promise<void
       const ta = document.querySelector('.ai-composer textarea');
       if (!ta) return false;
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(ta, 'What is the biggest risk in this report?');
+      setter.call(ta, 'What risks does the report list, and what does it recommend?');
       ta.dispatchEvent(new Event('input', { bubbles: true }));
       return true;
     })()`)
@@ -112,7 +117,7 @@ export async function runShots(win: BrowserWindow, outDir: string): Promise<void
     if (asked) {
       await js<boolean>(`(() => { [...document.querySelectorAll('.ai-send-row button')].find(b => b.textContent === 'Ask')?.click(); return true })()`)
       // A local model needs time to load and answer.
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 100; i++) {
         await wait(3000)
         const done = await js<boolean>(`!!document.querySelector('.ai-turn.assistant .ai-answer')`)
         if (done) break
@@ -129,10 +134,101 @@ export async function runShots(win: BrowserWindow, outDir: string): Promise<void
       await wait(900)
     }
     await shot('05-ai.png', 'Asking questions about your documents, answered with citations')
+    win.webContents.send('menu:action', { action: 'ai:toggle' })
+    await wait(600)
+    }
+
+    await newShots(win, js, shot)
 
     await fsp.writeFile(join(outDir, 'README.txt'), log.join('\n') + '\n', 'utf8')
   } catch (err) {
     await fsp.writeFile(join(outDir, 'error.txt'), String((err as Error)?.stack ?? err), 'utf8')
   }
   app.exit(0)
+}
+
+/**
+ * The 1.2.0 features: Compare documents, Reader mode, and a converted PDF with
+ * its pictures in page view. Uses the files in Compare-Test-Samples beside the
+ * project, and a second window as the other side of the comparison, so no
+ * file dialog is needed.
+ */
+async function newShots(
+  win: BrowserWindow,
+  js: <T>(code: string) => Promise<T>,
+  shot: (name: string, note: string) => Promise<void>
+): Promise<void> {
+  const samples = join(dirname(app.getAppPath()), 'Compare-Test-Samples')
+  const open = (w: BrowserWindow, path: string): void => w.webContents.send('menu:action', { action: 'file:openPath', payload: path })
+
+  /* 6 — Compare documents, side by side */
+  open(win, join(samples, '01-contract-v1.md'))
+  await wait(1800)
+  const before = new Set(BrowserWindow.getAllWindows())
+  await js<boolean>(`window.api.newWindow().then(() => true)`)
+  await wait(2500)
+  const other = BrowserWindow.getAllWindows().find((w) => !before.has(w))
+  if (other) {
+    open(other, join(samples, '02-contract-v2.md'))
+    await wait(2000)
+    other.hide()
+    win.focus()
+    await wait(500)
+    await js<boolean>(`(async () => {
+      const pause = (ms) => new Promise(r => setTimeout(r, ms));
+      [...document.querySelectorAll('.toolbar button')].find(b => /Compare/.test(b.textContent))?.click();
+      await pause(1500);
+      document.querySelectorAll('.cmp-mode')[0]?.click();
+      await pause(400);
+      const d = document.querySelector('.compare-choose details'); if (d) d.open = true;
+      await pause(200);
+      [...document.querySelectorAll('.compare-choose .compare-source')].find(b => /02-contract-v2/.test(b.textContent))?.click();
+      await pause(1500);
+      return true;
+    })()`)
+    await wait(800)
+    await shot('06-compare.png', 'Compare documents: every difference, side by side, with the changed words marked')
+
+    await js<boolean>(`(() => { [...document.querySelectorAll('.segmented button')].find(b => b.textContent === 'Inline')?.click(); return true })()`)
+    await wait(800)
+    await shot('07-compare-inline.png', 'Compare documents: inline view, like tracked changes')
+    await js<boolean>(`(() => { [...document.querySelectorAll('.cmp-actions button')].find(b => b.textContent === 'Close')?.click(); return true })()`)
+    await wait(800)
+    other.destroy()
+  }
+
+  /* 8 — Reader mode, sepia */
+  open(win, join(tmpdir(), 'demo.md'))
+  await wait(1800)
+  win.webContents.send('menu:action', { action: 'view:reader' })
+  await wait(1200)
+  await js<boolean>(`(() => { [...document.querySelectorAll('.reader-palette')].find(b => /Sepia/i.test(b.textContent))?.click(); return true })()`)
+  await wait(900)
+  await shot('08-reader.png', 'Reader mode: text size, line width, spacing and page colours')
+  win.webContents.send('menu:action', { action: 'view:reader' })
+  await wait(900)
+
+  /* 9 — a PDF converted with its pictures, in page view */
+  const pdf = join(app.getAppPath(), 'samples', 'sample-pictures.pdf').replace(/\\/g, '\\\\')
+  const md = await js<string>(`(async () => {
+    for (let i = 0; i < 50 && !window.__convert; i++) await new Promise(r => setTimeout(r, 200));
+    const r = await window.api.readBytes("${pdf}");
+    const c = await window.__convert.convertToMarkdown(new Uint8Array(r.bytes), "sample-pictures.pdf", {});
+    return c.ok ? c.markdown : '';
+  })()`)
+  if (md) {
+    const out = join(tmpdir(), 'Quarterly report (from PDF).md')
+    await fsp.writeFile(out, md, 'utf8')
+    open(win, out)
+    await wait(2000)
+    // A converted PDF opens in page view by itself; close the side panel left
+    // open by the earlier shots and start at the top.
+    await js<boolean>(`(() => {
+      document.querySelector('.sidebar button[title="Close panel"]')?.click();
+      document.querySelector('.preview-scroll')?.scrollTo(0, 0);
+      return true;
+    })()`)
+    await wait(1500)
+    await shot('09-pdf-pictures-page-view.png', 'A PDF converted to Markdown with its pictures, shown at its original page size')
+  }
 }
