@@ -10,9 +10,42 @@
  * Characters that cannot be located in the source (entities, generated text)
  * are mapped to the current source cursor and do not advance it.
  */
+/**
+ * Stretches of the source that never show as text: a picture's whole
+ * `![alt](address)`, a link's `(address "title")`, HTML tags and comments.
+ *
+ * The forward walk below must step over them. A picture embedded as a data
+ * URL is tens of thousands of letters and digits; the walk used to find the
+ * next visible letters *inside* it, so a highlight next to a picture was
+ * written into the middle of the picture's data, which then showed as text.
+ */
+export function hiddenRanges(source: string): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  const add = (re: RegExp, skip = 0): void => {
+    let m: RegExpExecArray | null
+    while ((m = re.exec(source))) out.push([m.index + skip, m.index + m[0].length])
+  }
+  const url = String.raw`\((?:[^()\s]|\([^()\s]*\))*(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*\)`
+  add(new RegExp(String.raw`!\[[^\]\n]*\]` + url, 'g'))
+  add(new RegExp(String.raw`\]` + url, 'g'), 1)
+  add(/<!--[\s\S]*?-->/g)
+  add(/<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?\/?>/g)
+  out.sort((a, b) => a[0] - b[0])
+  // Merge overlaps (a link address inside a picture, tags inside comments).
+  const merged: Array<[number, number]> = []
+  for (const r of out) {
+    const last = merged[merged.length - 1]
+    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1])
+    else merged.push([r[0], r[1]])
+  }
+  return merged
+}
+
 export function buildSourceMap(source: string, rendered: string, lookahead = 6000): Int32Array {
   const map = new Int32Array(rendered.length + 1)
   let si = 0
+  const hidden = hiddenRanges(source)
+  let h = 0
 
   for (let ri = 0; ri < rendered.length; ri++) {
     const ch = rendered[ri]
@@ -38,9 +71,18 @@ export function buildSourceMap(source: string, rendered: string, lookahead = 600
       continue
     }
 
-    const limit = Math.min(source.length, si + lookahead)
     let found = -1
-    for (let k = si; k < limit; k++) {
+    let budget = lookahead
+    while (h < hidden.length && hidden[h][1] <= si) h++
+    let hh = h
+    for (let k = si; k < source.length && budget > 0; k++) {
+      // Jump over hidden stretches; they do not use up the lookahead.
+      while (hh < hidden.length && hidden[hh][1] <= k) hh++
+      if (hh < hidden.length && k >= hidden[hh][0]) {
+        k = hidden[hh][1] - 1
+        continue
+      }
+      budget--
       if (source[k] === ch) {
         found = k
         break

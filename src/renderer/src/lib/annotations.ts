@@ -1,3 +1,4 @@
+import { hiddenRanges } from './align'
 import type { AnnotationMeta, AnnotationType } from '../../../shared/types'
 
 const TAG_FOR: Record<AnnotationType, string> = {
@@ -125,6 +126,14 @@ export function segmentRange(source: string, start: number, end: number): Array<
   if (e <= s) return []
   s = nudgeOut(source, s, -1)
   e = nudgeOut(source, e, 1)
+  // Never put a tag inside a picture or a link's address: that breaks the
+  // picture (its data shows as text) or the link. A picture is taken whole;
+  // a range starting in a link address starts after it.
+  for (const [hs, he] of hiddenRanges(source)) {
+    if (s > hs && s < he) s = source[hs] === '!' || source[hs] === '<' ? hs : he
+    if (e > hs && e < he) e = he
+  }
+  if (e <= s) return []
 
   const out: Array<[number, number]> = []
   let cursor = s
@@ -263,4 +272,50 @@ export function updateNote(source: string, id: string, note: string): string {
     const added = note ? ` data-mn-note="${escapeAttr(note)}"` : ''
     return `${head}${cleaned}${added}${tail}`
   })
+}
+
+/* --------------------------------------------------------------- repair */
+
+/**
+ * Mends pictures damaged by an annotation written into their data.
+ *
+ * Before the fix in align.ts, a highlight next to an embedded picture could
+ * land inside the picture's data URL; the picture then showed as a wall of
+ * base64 text, and AutoSave kept it that way. This takes every annotation tag
+ * out of picture data, drops what is left of those annotations, and removes
+ * any annotation tag left without its partner. A document with no damaged
+ * picture is returned unchanged.
+ */
+export function repairPictures(source: string): { source: string; repaired: number } {
+  const ids = new Set<string>()
+  let repaired = 0
+  let out = source.replace(/data:[a-z]+\/[a-z0-9.+-]+;base64,(?:[A-Za-z0-9+/=\s]|<[^>\n]*>)+/gi, (run) => {
+    if (!run.includes('<')) return run
+    repaired++
+    for (const m of run.matchAll(/data-mn-id="([^"]+)"/g)) ids.add(m[1])
+    return run.replace(/<[^>]*>/g, '')
+  })
+  if (!repaired) return { source, repaired: 0 }
+  for (const id of ids) out = removeAnnotation(out, id)
+
+  // Balance what remains: a close with no open, or an annotation's open tag
+  // with no close, is a piece of a damaged annotation.
+  const tag = new RegExp(`<(/?)(${TAG_NAMES.join('|')})\\b[^>]*>`, 'gi')
+  const stack: Array<{ name: string; start: number; end: number; ann: boolean }> = []
+  const drop: Array<[number, number]> = []
+  let m: RegExpExecArray | null
+  while ((m = tag.exec(out))) {
+    const name = m[2].toLowerCase()
+    if (m[1] !== '/') {
+      stack.push({ name, start: m.index, end: m.index + m[0].length, ann: m[0].includes('data-mn-id=') })
+      continue
+    }
+    const at = stack.map((t) => t.name).lastIndexOf(name)
+    if (at === -1) drop.push([m.index, m.index + m[0].length])
+    else stack.splice(at)
+  }
+  for (const t of stack) if (t.ann) drop.push([t.start, t.end])
+  drop.sort((a, b) => b[0] - a[0])
+  for (const [a, b] of drop) out = out.slice(0, a) + out.slice(b)
+  return { source: out, repaired }
 }
