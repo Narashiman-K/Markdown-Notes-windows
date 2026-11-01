@@ -13,7 +13,10 @@
  *   - ask the AI to explain the differences;
  *   - export the comparison as a page (HTML) or Markdown.
  *
- * Left-side edits go into the open document as undoable steps. Right-side
+ * The first (left) document is the open one by default, or any file or
+ * document the user picks instead, so two files can be compared without
+ * opening either. Left-side edits to the open document go into it as undoable
+ * steps; a picked first document is saved with its own button, like the right. Right-side
  * edits are kept here until saved with the button the source provides (or
  * offered when closing); a source with no way to save is view-only.
  *
@@ -83,6 +86,11 @@ export default function CompareView(props: Props): React.JSX.Element {
   const [rightText, setRightText] = useState('')
   const [rightSaved, setRightSaved] = useState('')
   const [leftText, setLeftText] = useState(props.leftText)
+  /** A first document picked here instead of the open one; null = the open document. */
+  const [leftFile, setLeftFile] = useState<LoadedSide | null>(null)
+  const [leftSaved, setLeftSaved] = useState('')
+  /** The chooser is picking the first document rather than the one to compare with. */
+  const [pickingFirst, setPickingFirst] = useState(!props.leftText.trim())
   const [view, setView] = useState<View>('side')
   const [wholeEdit, setWholeEdit] = useState(false)
   const [current, setCurrent] = useState(0)
@@ -94,9 +102,11 @@ export default function CompareView(props: Props): React.JSX.Element {
 
   // The open document can change underneath (autosave reload, another edit):
   // follow it while nothing here is being typed.
+  const isOpenDoc = leftFile === null
+  const leftName = leftFile ? leftFile.name : props.leftName
   useEffect(() => {
-    if (!wholeEdit && !editing) setLeftText(props.leftText)
-  }, [props.leftText, wholeEdit, editing])
+    if (isOpenDoc && !wholeEdit && !editing) setLeftText(props.leftText)
+  }, [props.leftText, wholeEdit, editing, isOpenDoc])
 
   useEffect(() => {
     props.listSources().then(setSources, (e) => setError(String(e?.message ?? e)))
@@ -105,8 +115,9 @@ export default function CompareView(props: Props): React.JSX.Element {
 
   const comparison = useMemo(() => (right ? compareTexts(leftText, rightText) : null), [right, leftText, rightText])
   const changes = comparison?.changes ?? []
-  const names = { left: props.leftName, right: right?.name ?? '' }
+  const names = { left: leftName, right: right?.name ?? '' }
   const rightDirty = right !== null && rightText !== rightSaved
+  const leftDirty = leftFile !== null && leftText !== leftSaved
 
   useEffect(() => {
     if (current >= changes.length) setCurrent(Math.max(0, changes.length - 1))
@@ -137,6 +148,30 @@ export default function CompareView(props: Props): React.JSX.Element {
     }
   }
 
+  const chooseFirst = async (source: CompareSource): Promise<void> => {
+    setError(null)
+    setLoading(source.label)
+    try {
+      const loaded = await source.load()
+      if (!loaded) return
+      const text = normaliseNewlines(loaded.text)
+      setLeftFile(loaded)
+      setLeftText(text)
+      setLeftSaved(text)
+      setPickingFirst(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const useOpenDocument = (): void => {
+    setLeftFile(null)
+    setLeftText(props.leftText)
+    setPickingFirst(false)
+  }
+
   const goTo = useCallback(
     (i: number) => {
       if (!changes.length) return
@@ -156,18 +191,18 @@ export default function CompareView(props: Props): React.JSX.Element {
 
   const setLeft = (text: string, label: string): void => {
     setLeftText(text)
-    props.onLeftChange(text, label)
+    if (isOpenDoc) props.onLeftChange(text, label)
   }
 
   const take = (c: Change, into: Side): void => {
     if (!comparison) return
     if (into === 'left') setLeft(takeChange(comparison, c.index, 'left', leftText), 'Compare: took a change')
     else setRightText(takeChange(comparison, c.index, 'right', rightText))
-    flash(into === 'left' ? `Change ${c.index + 1} taken into ${props.leftName}. Ctrl+Z to undo.` : `Change ${c.index + 1} taken into ${names.right}.`)
+    flash(into === 'left' ? `Change ${c.index + 1} taken into ${leftName}.${isOpenDoc ? ' Ctrl+Z to undo.' : ''}` : `Change ${c.index + 1} taken into ${names.right}.`)
   }
 
   const takeAll = async (into: Side): Promise<void> => {
-    const target = into === 'left' ? props.leftName : names.right
+    const target = into === 'left' ? leftName : names.right
     if (!(await props.confirm('Take every change?', `Make ${target} the same as the other document? ${changes.length} change(s).`))) return
     if (into === 'left') setLeft(rightText, 'Compare: took every change')
     else setRightText(leftText)
@@ -180,34 +215,40 @@ export default function CompareView(props: Props): React.JSX.Element {
     setEditing(null)
   }
 
-  const saveRight = async (): Promise<boolean> => {
-    if (!right?.save) return false
-    const err = await right.save(rightText)
+  const saveSide = async (side: Side): Promise<boolean> => {
+    const target = side === 'left' ? leftFile : right
+    const text = side === 'left' ? leftText : rightText
+    if (!target?.save) return false
+    const err = await target.save(text)
     if (err) {
       setError(err)
       return false
     }
-    setRightSaved(rightText)
-    flash(`Saved ${names.right}.`)
+    if (side === 'left') setLeftSaved(text)
+    else setRightSaved(text)
+    flash(`Saved ${target.name}.`)
     return true
   }
 
-  const close = async (): Promise<void> => {
-    if (wholeEdit && leftText !== props.leftText) props.onLeftChange(leftText, 'Compare: edited')
-    if (rightDirty) {
-      if (right?.save) {
-        if (await props.confirm('Save the other document?', `${names.right} was changed here. Save it before closing?`)) {
-          if (!(await saveRight())) return
-        }
-      } else if (!(await props.confirm('Close the comparison?', `The changes made here to ${names.right} cannot be saved back to it and will be lost.`))) {
-        return
-      }
+  /** Before leaving: offer to save a side changed here; false = stay. */
+  const settle = async (side: Side): Promise<boolean> => {
+    const target = side === 'left' ? leftFile : right
+    if (!target || !(side === 'left' ? leftDirty : rightDirty)) return true
+    if (target.save) {
+      if (await props.confirm(`Save ${target.name}?`, `${target.name} was changed here. Save it before closing?`)) return saveSide(side)
+      return true
     }
+    return props.confirm('Close the comparison?', `The changes made here to ${target.name} cannot be saved back to it and will be lost.`)
+  }
+
+  const close = async (): Promise<void> => {
+    if (isOpenDoc && wholeEdit && leftText !== props.leftText) props.onLeftChange(leftText, 'Compare: edited')
+    if (!(await settle('left')) || !(await settle('right'))) return
     props.onClose()
   }
 
   const leaveWholeEdit = (): void => {
-    if (leftText !== props.leftText) props.onLeftChange(leftText, 'Compare: edited')
+    if (isOpenDoc && leftText !== props.leftText) props.onLeftChange(leftText, 'Compare: edited')
     setWholeEdit(false)
   }
 
@@ -225,7 +266,7 @@ export default function CompareView(props: Props): React.JSX.Element {
 
   const exportAs = async (kind: 'html' | 'md'): Promise<void> => {
     if (!comparison) return
-    const base = `Comparison - ${props.leftName.replace(/\.[^.]+$/, '')} vs ${names.right.replace(/\.[^.]+$/, '')}`
+    const base = `Comparison - ${leftName.replace(/\.[^.]+$/, '')} vs ${names.right.replace(/\.[^.]+$/, '')}`
     await props.exportReport(
       `${base}.${kind}`,
       kind === 'html' ? htmlReport(comparison, names) : markdownReport(comparison, names),
@@ -253,20 +294,40 @@ export default function CompareView(props: Props): React.JSX.Element {
   /* ------------------------------------------------------------- choose */
 
   if (!right) {
+    const list = sources ?? []
     return (
       <div className="modal-backdrop" data-mn-ignore onMouseDown={props.onClose}>
         <div className="modal compare-choose" onMouseDown={(e) => e.stopPropagation()}>
-          <h3>Compare {props.leftName} with…</h3>
+          <h3>Compare documents</h3>
+          <div className="cmp-step">
+            <div className="cmp-step-title">1. First document</div>
+            <div className="compare-first">
+              <span className="compare-first-name">
+                {pickingFirst ? <span className="muted">Choose below…</span> : <b>{leftName}</b>}
+                {!pickingFirst && <span className="muted small">{isOpenDoc ? ' (the open document)' : ''}</span>}
+              </span>
+              {(pickingFirst || !isOpenDoc) && props.leftText.trim() !== '' && (
+                <button className="cmp-mini" onClick={useOpenDocument}>Use the open document</button>
+              )}
+              {!pickingFirst && (
+                <button className="cmp-mini" onClick={() => setPickingFirst(true)}>Choose another…</button>
+              )}
+            </div>
+          </div>
+          <div className="cmp-step-title">{pickingFirst ? 'Choose the first document' : '2. Compare it with'}</div>
           {!sources && !error && <Loader label="Looking for documents…" />}
           {loading && <Loader label={`Opening ${loading}…`} />}
           {sources && !loading && (
             <div className="compare-sources">
-              {sources.map((s) => (
-                <button key={s.id} className="compare-source" onClick={() => void choose(s)}>
-                  <span>{s.label}</span>
-                  {s.detail && <span className="muted small">{s.detail}</span>}
-                </button>
-              ))}
+              {list
+                // The open document's saved version only makes sense beside it.
+                .filter((s) => !(s.id === 'saved' && (pickingFirst || !isOpenDoc)))
+                .map((s) => (
+                  <button key={s.id} className="compare-source" onClick={() => void (pickingFirst ? chooseFirst(s) : choose(s))}>
+                    <span>{s.label}</span>
+                    {s.detail && <span className="muted small">{s.detail}</span>}
+                  </button>
+                ))}
             </div>
           )}
           {error && <p className="error-text">{error}</p>}
@@ -315,7 +376,7 @@ export default function CompareView(props: Props): React.JSX.Element {
   const editButton = (c: Change, side: Side): React.ReactNode => (
     <button
       className="cmp-mini"
-      title={`Edit this on the ${side === 'left' ? props.leftName : names.right} side`}
+      title={`Edit this on the ${side === 'left' ? leftName : names.right} side`}
       onClick={() => setEditing({ index: c.index, side, draft: (side === 'left' ? c.left : c.right).join('\n') })}
     >
       ✎
@@ -346,17 +407,17 @@ export default function CompareView(props: Props): React.JSX.Element {
     <div className="compare-view" data-mn-ignore>
       <div className="cmp-bar">
         <div className="cmp-title">
-          <b title={props.leftName}>{props.leftName}</b>
+          <b title={leftName}>{leftName}</b>
           <span className="muted">↔</span>
           <b title={names.right}>{names.right}</b>
-          {rightDirty && <span className="muted small">(changed)</span>}
+          {(leftDirty || rightDirty) && <span className="muted small">(changed here, not saved)</span>}
         </div>
         <div className="cmp-stats">
           {stats.changes === 0 ? (
             <span className="muted">Identical</span>
           ) : (
             <>
-              <span className="removed-pill" title={`Words only in ${props.leftName}`}>−{stats.wordsLeftOnly}</span>
+              <span className="removed-pill" title={`Words only in ${leftName}`}>−{stats.wordsLeftOnly}</span>
               <span className="added-pill" title={`Words only in ${names.right}`}>+{stats.wordsRightOnly}</span>
               <button className="cmp-mini" title="Previous change (Alt+Up)" onClick={() => goTo(current - 1)}>▲</button>
               <span className="small">Change {Math.min(current + 1, stats.changes)} of {stats.changes}</span>
@@ -375,9 +436,14 @@ export default function CompareView(props: Props): React.JSX.Element {
           <button onClick={() => void explain()} disabled={ai?.busy}>✨ Explain</button>
           <button onClick={() => void exportAs('html')} title="Save the comparison as a page">Export HTML</button>
           <button onClick={() => void exportAs('md')} title="Save the comparison as Markdown">Export MD</button>
+          {leftFile?.save && (
+            <button className={leftDirty ? 'primary' : ''} disabled={!leftDirty} onClick={() => void saveSide('left')}>
+              {leftFile.saveLabel ? `${leftFile.saveLabel} (left)` : `Save ${leftName}`}
+            </button>
+          )}
           {right.save && (
-            <button className={rightDirty ? 'primary' : ''} disabled={!rightDirty} onClick={() => void saveRight()}>
-              {right.saveLabel ?? `Save ${names.right}`}
+            <button className={rightDirty ? 'primary' : ''} disabled={!rightDirty} onClick={() => void saveSide('right')}>
+              {(right.saveLabel ?? `Save ${names.right}`) + (leftFile?.save ? ' (right)' : '')}
             </button>
           )}
           <button onClick={() => { setRight(null); setEditing(null); setWholeEdit(false) }} title="Compare with a different document">Change…</button>
@@ -392,7 +458,7 @@ export default function CompareView(props: Props): React.JSX.Element {
           {wholeEdit ? (
             <div className="cmp-whole">
               <label>
-                <span>{props.leftName}</span>
+                <span>{leftName}</span>
                 <textarea value={leftText} onChange={(e) => setLeftText(e.target.value)} spellCheck={false} />
               </label>
               <label>
@@ -404,7 +470,7 @@ export default function CompareView(props: Props): React.JSX.Element {
           ) : view === 'side' ? (
             <>
               <div className="cmp-row cmp-head">
-                <div className="cmp-cell">{props.leftName} (this window)</div>
+                <div className="cmp-cell">{leftName}{isOpenDoc ? ' (open document)' : ''}</div>
                 <div className="cmp-mid" />
                 <div className="cmp-cell">{names.right}</div>
               </div>
@@ -423,7 +489,7 @@ export default function CompareView(props: Props): React.JSX.Element {
                     </div>
                     <div className="cmp-mid">
                       <button className="cmp-mini" title={`Use this change in ${names.right}`} onClick={() => take(block, 'right')}>→</button>
-                      <button className="cmp-mini" title={`Use this change in ${props.leftName}`} onClick={() => take(block, 'left')}>←</button>
+                      <button className="cmp-mini" title={`Use this change in ${leftName}`} onClick={() => take(block, 'left')}>←</button>
                     </div>
                     <div className={`cmp-cell${block.right.length ? '' : ' empty'}`}>
                       {editor(block, 'right') ?? (
@@ -445,8 +511,8 @@ export default function CompareView(props: Props): React.JSX.Element {
                 ) : (
                   <div key={b} className={`cmp-change cmp-inline-change${block.index === current ? ' current' : ''}`} data-change={block.index} onClick={() => setCurrent(block.index)}>
                     <div className="cmp-inline-tools">
-                      <button className="cmp-mini" title={`Keep ${props.leftName}'s version in ${names.right} too`} onClick={() => take(block, 'right')}>Keep left</button>
-                      <button className="cmp-mini" title={`Use ${names.right}'s version in ${props.leftName}`} onClick={() => take(block, 'left')}>Use right</button>
+                      <button className="cmp-mini" title={`Keep ${leftName}'s version in ${names.right} too`} onClick={() => take(block, 'right')}>Keep left</button>
+                      <button className="cmp-mini" title={`Use ${names.right}'s version in ${leftName}`} onClick={() => take(block, 'left')}>Use right</button>
                       {editButton(block, 'left')}
                     </div>
                     {editor(block, 'left') ?? <div className="cmp-line">{inlineWords(block)}</div>}
@@ -457,7 +523,7 @@ export default function CompareView(props: Props): React.JSX.Element {
           )}
           {!wholeEdit && stats.changes > 1 && (
             <div className="cmp-footer">
-              <button onClick={() => void takeAll('left')}>Make {props.leftName} match</button>
+              <button onClick={() => void takeAll('left')}>Make {leftName} match</button>
               <button onClick={() => void takeAll('right')}>Make {names.right} match</button>
             </div>
           )}
