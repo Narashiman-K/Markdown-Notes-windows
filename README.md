@@ -100,6 +100,8 @@ Everything except audio works with no internet connection and no account.
 | ChatGPT | OpenAI API key | OpenAI |
 | Gemini | Google AI Studio key | Google |
 
+**New to local AI?** [LOCAL-AI-OLLAMA.md](LOCAL-AI-OLLAMA.md) walks through installing Ollama, choosing a model for your PC's memory, and connecting it to the app — free, private and offline.
+
 Signing in with a consumer `claude.ai` / `chatgpt.com` account is deliberately
 not offered — those services provide no mechanism for third-party apps to use a
 personal chat subscription.
