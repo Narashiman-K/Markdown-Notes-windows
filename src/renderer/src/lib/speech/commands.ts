@@ -54,6 +54,30 @@ const COMMANDS: Array<[RegExp, string]> = [
   [/hyphen|dash/, ' – ']
 ]
 
+/**
+ * The same commands said in Hindi, Kannada and Tamil. The Indian-language
+ * model writes no punctuation of its own, so these are how a sentence gets
+ * its full stop. Matched as whole words by surrounding spaces, since \b does
+ * not see Indian scripts as word characters.
+ */
+const INDIC_COMMANDS: Array<[string[], string]> = [
+  [['नया अनुच्छेद', 'ಹೊಸ ಪ್ಯಾರಾಗ್ರಾಫ್', 'புதிய பத்தி'], '\n\n'],
+  [['नई पंक्ति', 'नई लाइन', 'ಹೊಸ ಸಾಲು', 'புதிய வரி'], '\n'],
+  [['पूर्ण विराम', 'फुल स्टॉप', 'ಪೂರ್ಣ ವಿರಾಮ', 'ಫುಲ್ ಸ್ಟಾಪ್', 'முற்றுப்புள்ளி', 'ஃபுல் ஸ்டாப்'], '.'],
+  [['अल्प विराम', 'कॉमा', 'ಅಲ್ಪ ವಿರಾಮ', 'ಕಾಮಾ', 'காற்புள்ளி', 'கமா'], ','],
+  [['प्रश्नवाचक चिह्न', 'प्रश्न चिह्न', 'ಪ್ರಶ್ನಾರ್ಥಕ ಚಿಹ್ನೆ', 'ಪ್ರಶ್ನೆ ಚಿಹ್ನೆ', 'கேள்விக்குறி'], '?']
+]
+
+function applyIndicCommands(text: string): string {
+  let out = ` ${text} `
+  for (const [phrases, insert] of INDIC_COMMANDS) {
+    // Spaces kept around what goes in, so a command right after another still
+    // has the spaces it is matched by; they are tidied away below.
+    for (const p of phrases) out = out.split(` ${p} `).join(` ${insert} `)
+  }
+  return out.replace(/ +([.,?])/g, '$1').replace(/ *\n */g, '\n').trim()
+}
+
 const UNDO = /^(undo that|delete that|scratch that)$/i
 const STOP = /^(stop dictation|stop listening)$/i
 
@@ -66,6 +90,8 @@ export function toActions(text: string, commands = true): DictationAction[] {
   if (commands && UNDO.test(bare)) return [{ kind: 'undo' }]
   if (commands && STOP.test(bare)) return [{ kind: 'stop' }]
   if (!commands) return text ? [{ kind: 'text', text }] : []
+  // Commands said in an Indian language (the text has a non-Latin script).
+  if (/[\u0900-\u0DFF]/.test(text)) text = applyIndicCommands(text)
 
   const alternatives = COMMANDS.map(([re]) => `(${re.source})`).join('|')
   const finder = new RegExp(`[\\s,.;:!?]*\\b(?:${alternatives})\\b[\\s,.;:!?]*`, 'gi')

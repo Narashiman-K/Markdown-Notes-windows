@@ -78,3 +78,42 @@ describe('dictation commands', () => {
     expect(joinText('हिंदी में', 'लिखना')).toBe(' लिखना')
   })
 })
+describe('Indian-language engine', () => {
+  it('chooses IndicConformer for Indian languages, Whisper otherwise', async () => {
+    const { engineFor, DEFAULT_DICTATION: D } = await import('../src/renderer/src/lib/speech/dictation')
+    expect(engineFor({ ...D, language: 'kn' })).toEqual({ kind: 'indic', language: 'kn' })
+    expect(engineFor({ ...D, language: 'kn', translate: true }).kind).toBe('whisper')
+    expect(engineFor({ ...D, language: 'auto' }).kind).toBe('whisper')
+    expect(engineFor({ ...D, language: 'fr' }).kind).toBe('whisper')
+  })
+
+  it('computes normalised 80-band log-mel features, 100 frames a second', async () => {
+    const { logMel } = await import('../src/renderer/src/lib/speech/melFeatures')
+    const audio = new Float32Array(16000)
+    for (let i = 0; i < audio.length; i++) audio[i] = 0.3 * Math.sin((2 * Math.PI * 440 * i) / 16000) + 0.01 * Math.sin(i)
+    const { data, frames } = logMel(audio)
+    expect(frames).toBe(101)
+    expect(data.length).toBe(80 * frames)
+    let mean = 0
+    for (let t = 0; t < frames; t++) mean += data[10 * frames + t]
+    expect(Math.abs(mean / frames)).toBeLessThan(1e-3)
+    expect(data.every((v) => Number.isFinite(v))).toBe(true)
+  })
+
+  it('decodes CTC output: repeats merged, blanks dropped, word marks to spaces', async () => {
+    const { ctcGreedy } = await import('../src/renderer/src/lib/speech/melFeatures')
+    const vocab = ['▁नम', 'स्ते', '▁आज']
+    const blank = 3
+    const steps = [0, 0, blank, 1, 1, blank, 2, blank]
+    const logits = new Float32Array(steps.length * 4).fill(-10)
+    steps.forEach((id, t) => (logits[t * 4 + id] = 0))
+    expect(ctcGreedy(logits, steps.length, 4, vocab, blank)).toBe('नमस्ते आज')
+  })
+})
+describe('commands in Indian languages', () => {
+  it('turns spoken Hindi, Kannada and Tamil punctuation into marks', () => {
+    expect(toActions('आज बैठक है पूर्ण विराम नई पंक्ति कृपया आइए')).toEqual([{ kind: 'text', text: 'आज बैठक है.\nकृपया आइए' }])
+    expect(toActions('ನಮಸ್ಕಾರ ಅಲ್ಪ ವಿರಾಮ ಹೇಗಿದ್ದೀರಿ ಪ್ರಶ್ನೆ ಚಿಹ್ನೆ')).toEqual([{ kind: 'text', text: 'ನಮಸ್ಕಾರ, ಹೇಗಿದ್ದೀರಿ?' }])
+    expect(toActions('வணக்கம் முற்றுப்புள்ளி')).toEqual([{ kind: 'text', text: 'வணக்கம்.' }])
+  })
+})

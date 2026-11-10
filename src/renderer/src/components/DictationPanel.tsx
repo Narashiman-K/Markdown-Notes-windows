@@ -11,6 +11,9 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Dictation,
   MODEL_SIZES_MB,
+  INDIC_SIZE_MB,
+  engineFor,
+  modelCachedFor,
   type DictationHost,
   type DictationSettings,
   type DictationState
@@ -20,8 +23,6 @@ import { DICTATION_LANGUAGES, type DictationAction } from '../lib/speech/command
 interface Props {
   settings: DictationSettings
   host: DictationHost
-  /** Whether this model has been downloaded before (null = unknown). */
-  modelCached: (model: DictationSettings['model']) => Promise<boolean | null>
   onSettings: (next: DictationSettings) => void
   onActions: (actions: DictationAction[]) => void
   onClose: () => void
@@ -70,7 +71,7 @@ export default function DictationPanel(props: Props): React.JSX.Element {
 
   useEffect(() => {
     dictation.current?.update(settings)
-    void props.modelCached(settings.model).then(setCached)
+    void modelCachedFor(settings).then(setCached)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings])
 
@@ -115,10 +116,12 @@ export default function DictationPanel(props: Props): React.JSX.Element {
   })
 
   const set = (patch: Partial<DictationSettings>): void => props.onSettings({ ...settings, ...patch })
-  const size = MODEL_SIZES_MB[settings.model]
+  const engine = engineFor(settings)
+  const size = engine.kind === 'indic' ? { cpu: INDIC_SIZE_MB, gpu: INDIC_SIZE_MB } : MODEL_SIZES_MB[settings.model]
 
   const langName = DICTATION_LANGUAGES.find(([c]) => c === settings.language)?.[1] ?? settings.language
-  const summary = `${settings.model === 'small' ? 'Accurate' : 'Fast'} · ${langName}${settings.translate ? ' → English' : ''}${settings.commands ? ' · commands on' : ''}`
+  const engineName = engine.kind === 'indic' ? 'Indian-language model' : settings.model === 'small' ? 'Accurate' : 'Fast'
+  const summary = `${engineName} · ${langName}${settings.translate ? ' → English' : ''}${settings.commands ? ' · commands on' : ''}`
 
   // A slim bar docked above the status bar: it takes its own row, so the
   // document shrinks to make room instead of being covered.
@@ -150,7 +153,7 @@ export default function DictationPanel(props: Props): React.JSX.Element {
             </span>
           ) : cached === false && state === 'idle' ? (
             <span className="dict-note" title="Your voice never leaves this device.">
-              First use downloads the speech model once (about {size.cpu}–{size.gpu} MB), then works offline.
+              First use downloads the speech model once (about {size.cpu === size.gpu ? size.cpu : `${size.cpu}–${size.gpu}`} MB), then works offline.
             </span>
           ) : null}
         </div>
@@ -164,9 +167,15 @@ export default function DictationPanel(props: Props): React.JSX.Element {
 
       {showOptions && (
         <div className="dict-options">
-          <label title="Accurate copes better with accents and noise; Fast suits older PCs">
+          <label
+            title={
+              engine.kind === 'indic'
+                ? 'Indian languages use AI4Bharat IndicConformer, made for Indian speech; this choice applies to English and other languages'
+                : 'Accurate copes better with accents and noise; Fast suits older PCs'
+            }
+          >
             <span>Model</span>
-            <select value={settings.model} onChange={(e) => set({ model: e.target.value as DictationSettings['model'] })} disabled={listening}>
+            <select value={settings.model} onChange={(e) => set({ model: e.target.value as DictationSettings['model'] })} disabled={listening || engine.kind === 'indic'}>
               <option value="base">Fast</option>
               <option value="small">Accurate</option>
             </select>
@@ -197,6 +206,10 @@ export default function DictationPanel(props: Props): React.JSX.Element {
               Say: <b>new line</b>, <b>new paragraph</b>, <b>full stop</b>, <b>comma</b>, <b>question mark</b>,{' '}
               <b>exclamation mark</b>, <b>colon</b>, <b>bullet point</b>, <b>numbered point</b>, <b>heading</b>,{' '}
               <b>open / close bracket</b>, <b>open / close quote</b>, <b>undo that</b>, <b>stop dictation</b>.
+              <br />
+              In Hindi, Kannada and Tamil: <b>पूर्ण विराम / ಪೂರ್ಣ ವಿರಾಮ / முற்றுப்புள்ளி</b> (full stop),{' '}
+              <b>अल्प विराम / ಅಲ್ಪ ವಿರಾಮ / காற்புள்ளி</b> (comma), <b>प्रश्न चिह्न / ಪ್ರಶ್ನೆ ಚಿಹ್ನೆ / கேள்விக்குறி</b> (question mark),{' '}
+              <b>नई पंक्ति / ಹೊಸ ಸಾಲು / புதிய வரி</b> (new line), <b>नया अनुच्छेद / ಹೊಸ ಪ್ಯಾರಾಗ್ರಾಫ್ / புதிய பத்தி</b> (new paragraph).
             </div>
           )}
         </div>

@@ -701,6 +701,28 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
         '{"type":"timeout"}'
       )
       check('dictation: Whisper transcribes a recorded sentence', /revenue grew by 14/i.test(raw), raw.slice(0, 160))
+
+      const hindi = join(samples, 'dictation-hindi.wav').replace(/\\/g, '\\\\')
+      const rawHi = await jsWithTimeout<string>(
+        `(async () => {
+          const r = await window.api.readBytes("${hindi}");
+          const ctx = new AudioContext({ sampleRate: 16000 });
+          const ab = await ctx.decodeAudioData(new Uint8Array(r.bytes).buffer);
+          const audio = new Float32Array(ab.getChannelData(0));
+          const w = window.__indicWorker();
+          return await new Promise((res) => {
+            w.onmessage = (e) => {
+              const m = e.data;
+              if (m.type === 'ready') w.postMessage({ type: 'transcribe', id: 1, audio });
+              else if (m.type === 'result' || m.type === 'error') res(JSON.stringify(m));
+            };
+            w.postMessage({ type: 'load', language: 'hi', wasmPaths: location.origin + '/ort/' });
+          });
+        })()`,
+        300_000,
+        '{"type":"timeout"}'
+      )
+      check('dictation: the Indian-language model transcribes Hindi', /बैठक सोमवार/.test(rawHi), rawHi.slice(0, 160))
     }
 
     // The indented .txt is the original annotation bug: after conversion no line

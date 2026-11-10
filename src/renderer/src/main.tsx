@@ -21,6 +21,8 @@ if (window.api?.smokeMode) {
   // The speech worker, built exactly as dictation builds it.
   ;(window as unknown as Record<string, unknown>).__whisperWorker = () =>
     new Worker(new URL('./lib/speech/whisperWorker.ts', import.meta.url), { type: 'module' })
+  ;(window as unknown as Record<string, unknown>).__indicWorker = () =>
+    new Worker(new URL('./lib/speech/indicWorker.ts', import.meta.url), { type: 'module' })
 }
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(

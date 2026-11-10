@@ -38,6 +38,41 @@ export interface DictationSettings {
 
 export const DEFAULT_DICTATION: DictationSettings = { model: 'base', language: 'auto', translate: false, commands: true }
 
+/**
+ * Indian languages read by AI4Bharat's IndicConformer instead of Whisper.
+ * Whisper's small models drift into English or the wrong script on these
+ * and miss words; IndicConformer, trained on Indian speech, gets far more
+ * right at a similar size (~140 MB per language).
+ */
+export const INDIC_LANGUAGES = new Set(['hi', 'kn', 'ta', 'te', 'ml', 'mr', 'bn', 'gu', 'pa', 'ur', 'or', 'as', 'ne', 'sa'])
+export const INDIC_SIZE_MB = 140
+
+/**
+ * Which engine reads this setting. Translation to English, automatic
+ * language detection and non-Indian languages stay with Whisper.
+ */
+export function engineFor(s: DictationSettings): { kind: 'indic'; language: string } | { kind: 'whisper'; model: DictationModel } {
+  return INDIC_LANGUAGES.has(s.language) && !s.translate ? { kind: 'indic', language: s.language } : { kind: 'whisper', model: s.model }
+}
+
+/** Whether the model this setting needs has been downloaded already (null = unknown). */
+export async function modelCachedFor(s: DictationSettings): Promise<boolean | null> {
+  try {
+    const e = engineFor(s)
+    const [cacheName, needle] =
+      e.kind === 'indic' ? ['indic-asr-cache', `indicconformer-${e.language}-onnx/resolve/main/model.int8.onnx`] : ['transformers-cache', MODEL_IDS[e.model]]
+    const keys = await (await caches.open(cacheName)).keys()
+    return keys.some((r) => r.url.includes(needle) && r.url.includes('.onnx'))
+  } catch {
+    return null
+  }
+}
+
+const engineKey = (s: DictationSettings): string => {
+  const e = engineFor(s)
+  return e.kind === 'indic' ? `indic:${e.language}` : `whisper:${e.model}`
+}
+
 export interface DictationHost {
   /** Base URL models are fetched from; omitted = Hugging Face directly. */
   remoteHost?: string
@@ -73,9 +108,15 @@ export class Dictation {
   ) {}
 
   update(settings: DictationSettings): void {
-    const modelChanged = settings.model !== this.settings.model
+    const engineChanged = engineKey(settings) !== engineKey(this.settings)
     this.settings = settings
-    if (modelChanged) this.dispose()
+    // A different engine or language model: stop and load the new one on the
+    // next start (or straight away if listening).
+    if (engineChanged) {
+      const wasListening = this.listening
+      this.dispose()
+      if (wasListening) void this.start().catch((err) => this.events.onState('error', String(err?.message ?? err)))
+    }
   }
 
   get listening(): boolean {
@@ -85,7 +126,10 @@ export class Dictation {
   private ensureWorker(): Promise<void> {
     if (this.worker && this.ready) return Promise.resolve()
     if (!this.worker) {
-      this.worker = new Worker(new URL('./whisperWorker.ts', import.meta.url), { type: 'module' })
+      this.worker =
+        engineFor(this.settings).kind === 'indic'
+          ? new Worker(new URL('./indicWorker.ts', import.meta.url), { type: 'module' })
+          : new Worker(new URL('./whisperWorker.ts', import.meta.url), { type: 'module' })
       this.worker.onmessage = (e) => this.onWorker(e.data)
       // A worker that fails to start at all (its script could not load) never
       // answers; without this the panel would wait for ever.
@@ -97,9 +141,11 @@ export class Dictation {
     return new Promise((resolve, reject) => {
       this.readyWaiters.push({ resolve, reject })
       this.events.onState('loading')
+      const engine = engineFor(this.settings)
       this.worker!.postMessage({
         type: 'load',
-        model: MODEL_IDS[this.settings.model],
+        language: engine.kind === 'indic' ? engine.language : undefined,
+        model: engine.kind === 'whisper' ? MODEL_IDS[engine.model] : undefined,
         remoteHost: this.host.remoteHost,
         useBrowserCache: this.host.useBrowserCache,
         wasmPaths: new URL('ort/', location.origin + '/').href
