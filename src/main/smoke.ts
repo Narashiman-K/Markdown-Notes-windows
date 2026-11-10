@@ -618,53 +618,6 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       check('compare documents: the window shares its document and lists the others', got.doc === 'string' && Array.isArray(got.others), raw)
     }
 
-    // Dictation: the panel opens, and the page's network access stays limited
-    // to the model host.
-    {
-      const raw = await jsWithTimeout<string>(
-        `(async () => {
-          // The page may reach Hugging Face for model files, and nowhere else.
-          const elsewhere = await fetch('https://example.com/').then(() => 'reached', () => 'blocked');
-          [...document.querySelectorAll('button')].find(b => (b.title || '').startsWith('Dictation'))?.click();
-          await new Promise(r => setTimeout(r, 600));
-          const panel = !!document.querySelector('.dictation-panel');
-          document.querySelector('.dict-close')?.click();
-          return JSON.stringify({ elsewhere, panel });
-        })()`,
-        15_000,
-        '{}'
-      )
-      const got = JSON.parse(raw) as { elsewhere?: string; panel?: boolean }
-      check('dictation: the page still cannot reach other sites', got.elsewhere === 'blocked', raw)
-      check('dictation: the panel opens from the toolbar', got.panel === true, raw)
-    }
-
-    // Full speech test, only on request (downloads ~125 MB the first time):
-    // a recorded sentence goes through Whisper exactly as dictation sends it.
-    if (process.env['MARKNOTE_SMOKE_SPEECH'] === '1') {
-      const wav = join(samples, 'dictation-test.wav').replace(/\\/g, '\\\\')
-      const raw = await jsWithTimeout<string>(
-        `(async () => {
-          const r = await window.api.readBytes("${wav}");
-          const ctx = new AudioContext({ sampleRate: 16000 });
-          const ab = await ctx.decodeAudioData(new Uint8Array(r.bytes).buffer);
-          const audio = new Float32Array(ab.getChannelData(0));
-          const w = window.__whisperWorker();
-          return await new Promise((res) => {
-            w.onmessage = (e) => {
-              const m = e.data;
-              if (m.type === 'ready') w.postMessage({ type: 'transcribe', id: 1, audio, language: 'en', translate: false });
-              else if (m.type === 'result' || m.type === 'error') res(JSON.stringify(m));
-            };
-            w.postMessage({ type: 'load', model: 'onnx-community/whisper-base', useBrowserCache: true, wasmPaths: location.origin + '/ort/' });
-          });
-        })()`,
-        300_000,
-        '{"type":"timeout"}'
-      )
-      check('dictation: Whisper transcribes a recorded sentence', /revenue grew by 14/i.test(raw), raw.slice(0, 160))
-    }
-
     mark('spreadsheet worker')
     const xlsxPath = join(samples, 'sample.xlsx').replace(/\\/g, '\\\\')
     const sheetRaw = await jsWithTimeout<string>(
@@ -693,6 +646,62 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       sheet.badOk === false && /took longer than 3 seconds/.test(sheet.badError) && sheet.ms < 8000 && sheet.alive,
       sheetRaw
     )
+
+    // Dictation: the panel opens, and the page's network access stays limited
+    // to the model host.
+    {
+      const raw = await jsWithTimeout<string>(
+        `(async () => {
+          // The page may reach Hugging Face for model files, and nowhere else.
+          const elsewhere = await fetch('https://example.com/').then(() => 'reached', () => 'blocked');
+          [...document.querySelectorAll('button')].find(b => (b.title || '').startsWith('Dictation'))?.click();
+          await new Promise(r => setTimeout(r, 600));
+          const panel = !!document.querySelector('.dictation-panel');
+          document.querySelector('.dict-close')?.click();
+          return JSON.stringify({ elsewhere, panel });
+        })()`,
+        15_000,
+        '{}'
+      )
+      const got = JSON.parse(raw) as { elsewhere?: string; panel?: boolean }
+      check('dictation: the page still cannot reach other sites', got.elsewhere === 'blocked', raw)
+      check('dictation: the panel opens from the toolbar', got.panel === true, raw)
+      // After the panel has been open and closed, the app still works: a
+      // spreadsheet (a worker, like dictation) converts as normal.
+      const csv = join(samples, 'sample.xlsx').replace(/\\/g, '\\\\')
+      const after = await jsWithTimeout<string>(
+        `(async () => { const r = await window.api.readBytes("${csv}"); const c = await window.__convert.convertToMarkdown(new Uint8Array(r.bytes), "sample.xlsx", {}); return String(c.ok) })()`,
+        20_000,
+        'timed out'
+      )
+      check('dictation: the app keeps working after the panel closes', after === 'true', after)
+    }
+
+    // Full speech test, only on request (downloads ~125 MB the first time):
+    // a recorded sentence goes through Whisper exactly as dictation sends it.
+    if (process.env['MARKNOTE_SMOKE_SPEECH'] === '1') {
+      const wav = join(samples, 'dictation-test.wav').replace(/\\/g, '\\\\')
+      const raw = await jsWithTimeout<string>(
+        `(async () => {
+          const r = await window.api.readBytes("${wav}");
+          const ctx = new AudioContext({ sampleRate: 16000 });
+          const ab = await ctx.decodeAudioData(new Uint8Array(r.bytes).buffer);
+          const audio = new Float32Array(ab.getChannelData(0));
+          const w = window.__whisperWorker();
+          return await new Promise((res) => {
+            w.onmessage = (e) => {
+              const m = e.data;
+              if (m.type === 'ready') w.postMessage({ type: 'transcribe', id: 1, audio, language: 'en', translate: false });
+              else if (m.type === 'result' || m.type === 'error') res(JSON.stringify(m));
+            };
+            w.postMessage({ type: 'load', model: 'onnx-community/whisper-base', useBrowserCache: true, wasmPaths: location.origin + '/ort/' });
+          });
+        })()`,
+        300_000,
+        '{"type":"timeout"}'
+      )
+      check('dictation: Whisper transcribes a recorded sentence', /revenue grew by 14/i.test(raw), raw.slice(0, 160))
+    }
 
     // The indented .txt is the original annotation bug: after conversion no line
     // may start with four spaces or a tab, or highlights will not render.

@@ -1636,6 +1636,30 @@ export default function App(): React.JSX.Element {
         )}
       </main>
 
+      {dictationOpen && (
+        <DictationPanel
+          settings={dictation}
+          host={DICTATION_HOST}
+          toggleSignal={dictationToggle}
+          modelCached={async (model) => {
+            // transformers.js keeps downloads in this cache, keyed by URL.
+            try {
+              const cache = await caches.open('transformers-cache')
+              const keys = await cache.keys()
+              return keys.some((r) => r.url.includes(MODEL_IDS[model]) && r.url.includes('.onnx'))
+            } catch {
+              return null
+            }
+          }}
+          onSettings={(next) => {
+            setDictation(next)
+            void window.api.setSettings({ dictation: next })
+          }}
+          onActions={applyDictation}
+          onClose={() => setDictationOpen(false)}
+        />
+      )}
+
       <footer className="statusbar" data-mn-ignore>
         <span>{mode === 'view' ? 'View mode' : `Edit mode · Ln ${cursor.line}, Col ${cursor.col}`}</span>
         <span>{stats.words} words</span>
@@ -1694,30 +1718,6 @@ export default function App(): React.JSX.Element {
             setPendingDiff(null)
             flash(`${pendingDiff.label} applied. Ctrl+Z to undo.`)
           }}
-        />
-      )}
-
-      {dictationOpen && (
-        <DictationPanel
-          settings={dictation}
-          host={DICTATION_HOST}
-          toggleSignal={dictationToggle}
-          modelCached={async (model) => {
-            // transformers.js keeps downloads in this cache, keyed by URL.
-            try {
-              const cache = await caches.open('transformers-cache')
-              const keys = await cache.keys()
-              return keys.some((r) => r.url.includes(MODEL_IDS[model]) && r.url.includes('.onnx'))
-            } catch {
-              return null
-            }
-          }}
-          onSettings={(next) => {
-            setDictation(next)
-            void window.api.setSettings({ dictation: next })
-          }}
-          onActions={applyDictation}
-          onClose={() => setDictationOpen(false)}
         />
       )}
 
