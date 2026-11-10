@@ -1499,6 +1499,9 @@ html[data-theme='dark'] .error-text { color: #ff8a80; }
   transition: transform 90ms linear; pointer-events: none;
 }
 .dict-mic:not(.on) .dict-level { display: none; }
+.dict-pause { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--chrome-border); background: var(--bg); color: var(--fg); cursor: pointer; font-size: 13px; padding: 0; display: grid; place-items: center; }
+.dict-pause:hover { border-color: var(--accent); }
+.dict-saved { display: flex; align-items: center; gap: 12px; margin-top: 4px; color: var(--fg); }
 .dict-status { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; overflow: hidden; }
 .dict-state { flex: none; font-weight: 600; }
 .dict-heard, .dict-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }

@@ -16,7 +16,7 @@ import { VadSegmenter } from './vad'
 import { cleanTranscript, toActions, type DictationAction } from './commands'
 
 export type DictationModel = 'base' | 'small'
-export type DictationState = 'idle' | 'loading' | 'listening' | 'transcribing' | 'error'
+export type DictationState = 'idle' | 'loading' | 'listening' | 'transcribing' | 'paused' | 'error'
 
 export const MODEL_IDS: Record<DictationModel, string> = {
   base: 'onnx-community/whisper-base',
@@ -68,6 +68,57 @@ export async function modelCachedFor(s: DictationSettings): Promise<boolean | nu
   }
 }
 
+export interface SavedModel {
+  /** Cache entry prefix, used to delete it. */
+  id: string
+  label: string
+  sizeMb: number
+}
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  hi: 'Hindi', kn: 'Kannada', ta: 'Tamil', te: 'Telugu', ml: 'Malayalam', mr: 'Marathi', bn: 'Bengali', gu: 'Gujarati',
+  pa: 'Punjabi', ur: 'Urdu', or: 'Odia', as: 'Assamese', ne: 'Nepali', sa: 'Sanskrit'
+}
+
+/** The speech models kept on this device, each downloaded once. */
+export async function listSavedModels(): Promise<SavedModel[]> {
+  const out: SavedModel[] = []
+  try {
+    const sum = async (cacheName: string, match: (url: string) => string | null): Promise<Map<string, number>> => {
+      const sizes = new Map<string, number>()
+      const cache = await caches.open(cacheName)
+      for (const req of await cache.keys()) {
+        const id = match(req.url)
+        if (!id) continue
+        const res = await cache.match(req)
+        const len = Number(res?.headers.get('content-length') ?? 0) || (res ? (await res.clone().arrayBuffer()).byteLength : 0)
+        sizes.set(id, (sizes.get(id) ?? 0) + len)
+      }
+      return sizes
+    }
+    const indic = await sum('indic-asr-cache', (u) => /indicconformer-([a-z]+)-onnx/.exec(u)?.[1] ?? null)
+    for (const [lang, bytes] of indic) out.push({ id: `indic:${lang}`, label: `${LANGUAGE_NAMES[lang] ?? lang} (Indian-language model)`, sizeMb: Math.round(bytes / 1048576) })
+    const whisper = await sum('transformers-cache', (u) => (/whisper-small/.test(u) ? 'small' : /whisper-base/.test(u) ? 'base' : null))
+    for (const [m, bytes] of whisper) out.push({ id: `whisper:${m}`, label: m === 'small' ? 'English and other languages, Accurate' : 'English and other languages, Fast', sizeMb: Math.round(bytes / 1048576) })
+  } catch {
+    /* no cache API: nothing to list */
+  }
+  return out
+}
+
+/** Frees the space a saved model uses; it downloads again if used later. */
+export async function deleteSavedModel(id: string): Promise<void> {
+  const [kind, key] = id.split(':')
+  const cache = await caches.open(kind === 'indic' ? 'indic-asr-cache' : 'transformers-cache')
+  const needle = kind === 'indic' ? `indicconformer-${key}-onnx` : `whisper-${key}`
+  for (const req of await cache.keys()) if (req.url.includes(needle)) await cache.delete(req)
+}
+
+/** Asks the browser not to clear saved models when the disk is short of space. */
+export function keepModelsSaved(): void {
+  void navigator.storage?.persist?.().catch(() => undefined)
+}
+
 const engineKey = (s: DictationSettings): string => {
   const e = engineFor(s)
   return e.kind === 'indic' ? `indic:${e.language}` : `whisper:${e.model}`
@@ -98,6 +149,7 @@ export class Dictation {
   private busy = false
   private nextId = 1
   private levelTimer: number | null = null
+  private paused = false
   private files = new Map<string, { loaded: number; total: number }>()
   device: 'webgpu' | 'wasm' | null = null
 
@@ -204,7 +256,9 @@ export class Dictation {
     // ScriptProcessor is old but needs no separate module file, and 4096
     // samples (a quarter second) is far below what an utterance takes.
     this.node = this.ctx.createScriptProcessor(4096, 1, 1)
-    this.node.onaudioprocess = (e) => this.vad?.push(new Float32Array(e.inputBuffer.getChannelData(0)))
+    this.node.onaudioprocess = (e) => {
+      if (!this.paused) this.vad?.push(new Float32Array(e.inputBuffer.getChannelData(0)))
+    }
     source.connect(this.node)
     this.node.connect(this.ctx.destination)
     this.levelTimer = window.setInterval(() => this.events.onLevel(this.vad?.level ?? 0), 100)
@@ -218,6 +272,28 @@ export class Dictation {
     this.pump()
   }
 
+  get isPaused(): boolean {
+    return this.paused
+  }
+
+  /**
+   * Pause: the microphone stays open and the model stays loaded, but nothing
+   * is heard; what was said just before is still written. Resume carries on
+   * at once, with no reload.
+   */
+  pause(): void {
+    if (!this.stream || this.paused) return
+    this.paused = true
+    this.vad?.flush()
+    if (!this.busy && !this.queue.length) this.events.onState('paused')
+  }
+
+  resume(): void {
+    if (!this.stream || !this.paused) return
+    this.paused = false
+    this.events.onState(this.busy ? 'transcribing' : 'listening')
+  }
+
   /** Stops listening; what was already said is still written. */
   stop(): void {
     this.vad?.flush()
@@ -226,6 +302,7 @@ export class Dictation {
   }
 
   private stopCapture(): void {
+    this.paused = false
     if (this.levelTimer !== null) window.clearInterval(this.levelTimer)
     this.levelTimer = null
     this.node?.disconnect()
@@ -242,7 +319,7 @@ export class Dictation {
     if (this.busy || !this.worker || !this.ready) return
     const audio = this.queue.shift()
     if (!audio) {
-      this.events.onState(this.stream ? 'listening' : 'idle')
+      this.events.onState(this.stream ? (this.paused ? 'paused' : 'listening') : 'idle')
       return
     }
     this.busy = true

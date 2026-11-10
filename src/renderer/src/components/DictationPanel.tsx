@@ -14,6 +14,10 @@ import {
   INDIC_SIZE_MB,
   engineFor,
   modelCachedFor,
+  listSavedModels,
+  deleteSavedModel,
+  keepModelsSaved,
+  type SavedModel,
   type DictationHost,
   type DictationSettings,
   type DictationState
@@ -35,6 +39,7 @@ const STATE_TEXT: Record<DictationState, string> = {
   loading: 'Getting the speech model ready…',
   listening: 'Listening…',
   transcribing: 'Writing…',
+  paused: 'Paused. Press ▶ to carry on.',
   error: 'Something went wrong.'
 }
 
@@ -46,6 +51,7 @@ export default function DictationPanel(props: Props): React.JSX.Element {
   const [level, setLevel] = useState(0)
   const [heard, setHeard] = useState('')
   const [cached, setCached] = useState<boolean | null>(null)
+  const [saved, setSaved] = useState<SavedModel[] | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
   const dictation = useRef<Dictation | null>(null)
@@ -77,7 +83,7 @@ export default function DictationPanel(props: Props): React.JSX.Element {
 
   useEffect(() => () => dictation.current?.dispose(), [])
 
-  const listening = state === 'listening' || state === 'transcribing'
+  const listening = state === 'listening' || state === 'transcribing' || state === 'paused'
   const toggle = async (): Promise<void> => {
     const d = dictation.current!
     if (d.listening) {
@@ -85,6 +91,7 @@ export default function DictationPanel(props: Props): React.JSX.Element {
       return
     }
     try {
+      keepModelsSaved()
       await d.start()
       setCached(true)
     } catch (err) {
@@ -138,22 +145,36 @@ export default function DictationPanel(props: Props): React.JSX.Element {
           <span className="dict-mic-icon">🎙</span>
           <span className="dict-level" style={{ transform: `scale(${1 + level * 0.9})` }} />
         </button>
+        {listening && (
+          <button
+            className="dict-pause"
+            onClick={() => (state === 'paused' ? dictation.current?.resume() : dictation.current?.pause())}
+            title={state === 'paused' ? 'Resume listening' : 'Pause listening (the microphone stays ready)'}
+            aria-label={state === 'paused' ? 'Resume' : 'Pause'}
+          >
+            {state === 'paused' ? '▶' : '⏸'}
+          </button>
+        )}
         <div className="dict-status">
           <span className="dict-state">{state === 'error' ? detail || STATE_TEXT.error : STATE_TEXT[state]}</span>
           {progress && progress.total > 0 ? (
             <span className="dict-progress" title="One-time download">
               <span className="dict-progress-fill" style={{ width: `${Math.min(100, (progress.loaded / progress.total) * 100)}%` }} />
               <span className="dict-progress-text">
-                {progress.loaded.toFixed(0)} / {progress.total.toFixed(0)} MB
+                Downloading {engine.kind === 'indic' ? `${langName} model` : 'speech model'} once: {progress.loaded.toFixed(0)} / {progress.total.toFixed(0)} MB
               </span>
             </span>
           ) : heard && state !== 'error' ? (
             <span className="dict-heard" title={`Last thing heard: ${heard}`}>
               “{heard}”
             </span>
+          ) : cached === true && state === 'idle' ? (
+            <span className="dict-note">
+              {engine.kind === 'indic' ? `${langName} model` : 'Speech model'} saved on this device: works offline, no download.
+            </span>
           ) : cached === false && state === 'idle' ? (
             <span className="dict-note" title="Your voice never leaves this device.">
-              First use downloads the speech model once (about {size.cpu === size.gpu ? size.cpu : `${size.cpu}–${size.gpu}`} MB), then works offline.
+              First use of {engine.kind === 'indic' ? langName : 'this model'} downloads it once (about {size.cpu === size.gpu ? size.cpu : `${size.cpu}–${size.gpu}`} MB), then works offline.
             </span>
           ) : null}
         </div>
@@ -198,9 +219,42 @@ export default function DictationPanel(props: Props): React.JSX.Element {
             <input type="checkbox" checked={settings.commands} onChange={(e) => set({ commands: e.target.checked })} />
             <span>Voice commands</span>
           </label>
+          <button
+            className="link"
+            onClick={() => {
+              if (saved) setSaved(null)
+              else void listSavedModels().then(setSaved)
+            }}
+          >
+            {saved ? 'Hide saved models' : 'Saved models…'}
+          </button>
           <button className="link" onClick={() => setShowHelp((v) => !v)}>
             {showHelp ? 'Hide commands' : 'Commands…'}
           </button>
+          {saved && (
+            <div className="dict-help">
+              {saved.length === 0
+                ? 'No speech models saved yet.'
+                : 'Each model downloads once per language and is kept here, so switching back to a language does not download again.'}
+              {saved.map((m) => (
+                <div key={m.id} className="dict-saved">
+                  <span>
+                    {m.label} · {m.sizeMb} MB
+                  </span>
+                  <button
+                    className="link danger"
+                    disabled={listening}
+                    onClick={() => void deleteSavedModel(m.id).then(listSavedModels).then((l) => {
+                      setSaved(l)
+                      void modelCachedFor(settings).then(setCached)
+                    })}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {showHelp && (
             <div className="dict-help">
               Say: <b>new line</b>, <b>new paragraph</b>, <b>full stop</b>, <b>comma</b>, <b>question mark</b>,{' '}
