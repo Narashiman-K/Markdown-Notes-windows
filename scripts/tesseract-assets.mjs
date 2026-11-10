@@ -110,7 +110,36 @@ async function main() {
   )
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch((err) => {
+/**
+ * The ONNX runtime that runs Whisper (dictation) and the natural voices
+ * (read aloud), staged beside Tesseract for the same reason: without a local
+ * copy transformers.js fetches it from a CDN, which the Windows app's CSP
+ * refuses and which would break "offline". Only the build the WebGPU bundle
+ * asks for (asyncify: WebGPU, with the CPU as fallback) is copied: ~26 MB.
+ * Taken from the onnxruntime-web that transformers.js itself depends on, so
+ * the runtime and its loader can never be from different versions.
+ */
+const ORT_FILES = ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm']
+
+async function stageOrt() {
+  const ortDir = join(outDir, '..', 'ort')
+  await mkdir(ortDir, { recursive: true })
+  // Neither package exports its package.json, so look on disk: a copy nested
+  // under transformers.js wins over a hoisted one.
+  const nested = join(root, 'node_modules', '@huggingface', 'transformers', 'node_modules', 'onnxruntime-web')
+  const ortPkg = existsSync(nested) ? nested : join(root, 'node_modules', 'onnxruntime-web')
+  let total = 0
+  for (const file of ORT_FILES) {
+    const src = join(ortPkg, 'dist', file)
+    if (!existsSync(src)) throw new Error(`Expected ${file} in onnxruntime-web/dist; update ORT_FILES.`)
+    await copyFile(src, join(ortDir, file))
+    total += (await stat(src)).size
+  }
+  const version = require(join(ortPkg, 'package.json')).version
+  console.log(`onnxruntime: staged ${ORT_FILES.length} files (${version}), ${(total / 1024 / 1024).toFixed(1)} MB → ${ortDir}`)
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().then(stageOrt).catch((err) => {
   console.error(`\ntesseract asset staging failed: ${err.message}\n`)
   process.exit(1)
 })

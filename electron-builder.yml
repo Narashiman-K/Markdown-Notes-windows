@@ -10,6 +10,10 @@ files:
   - out/**
   - package.json
   - '!**/*.map'
+  # Vite also emits the ONNX runtime's WebAssembly next to the speech worker;
+  # the app loads the staged copy in out/renderer/ort/ instead, so this
+  # 27 MB duplicate is left out.
+  - '!out/renderer/assets/ort-wasm-*.wasm'
 
 asar: true
 compression: maximum
@@ -99,5 +103,8 @@ appx:
   languages: [en-US]
   showNameOnTiles: true
   setBuildNumber: true
+  # The microphone, for dictation (offline speech to text). runFullTrust is
+  # always added for Electron apps.
+  capabilities: [runFullTrust, microphone]
 
 

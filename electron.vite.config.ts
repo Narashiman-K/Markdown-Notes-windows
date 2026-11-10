@@ -25,6 +25,9 @@ export default defineConfig({
       alias: { '@': resolve(__dirname, 'src/renderer/src') }
     },
     plugins: [react()],
+    // ES-module workers: the speech worker loads the ONNX runtime with a
+    // dynamic import, which classic (iife) workers cannot do.
+    worker: { format: 'es' },
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/renderer/index.html') }

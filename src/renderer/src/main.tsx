@@ -18,6 +18,9 @@ if (window.api?.smokeMode) {
   void import('./lib/convert').then((m) => {
     ;(window as unknown as Record<string, unknown>).__convert = m
   })
+  // The speech worker, built exactly as dictation builds it.
+  ;(window as unknown as Record<string, unknown>).__whisperWorker = () =>
+    new Worker(new URL('./lib/speech/whisperWorker.ts', import.meta.url), { type: 'module' })
 }
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(

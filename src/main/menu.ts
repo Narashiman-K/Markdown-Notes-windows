@@ -173,6 +173,7 @@ export function buildMenu(win: BrowserWindow, send: Send): void {
       label: 'A&I',
       submenu: [
         { label: 'Ask Your Documents', accelerator: 'CmdOrCtrl+Shift+A', click: () => send('ai:toggle') },
+        { label: 'Dictation', accelerator: 'CmdOrCtrl+Shift+D', click: () => send('edit:dictate') },
         { type: 'separator' },
         { label: 'Summarise Document', click: () => send('ai:quick:summarise') },
         { label: 'Explain Selection', click: () => send('ai:quick:explain') },

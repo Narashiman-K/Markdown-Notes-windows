@@ -162,10 +162,17 @@ function registerAppProtocol(): void {
 const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'fullscreen'])
 
 function hardenSessions(): void {
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) =>
-    callback(ALLOWED_PERMISSIONS.has(permission))
+  // The microphone, for dictation, and nothing else of the camera/media
+  // family: a request that includes video is refused.
+  const audioOnly = (details: { mediaTypes?: string[]; mediaType?: string }): boolean =>
+    details.mediaTypes ? details.mediaTypes.length > 0 && details.mediaTypes.every((t) => t === 'audio') : details.mediaType === 'audio'
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) =>
+    callback(ALLOWED_PERMISSIONS.has(permission) || (permission === 'media' && audioOnly(details as { mediaTypes?: string[] })))
   )
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission))
+  session.defaultSession.setPermissionCheckHandler(
+    (_wc, permission, _origin, details) =>
+      ALLOWED_PERMISSIONS.has(permission) || (permission === 'media' && audioOnly(details as { mediaType?: string }))
+  )
   app.on('web-contents-created', (_e, contents) => {
     contents.on('will-attach-webview', (event) => event.preventDefault())
   })
