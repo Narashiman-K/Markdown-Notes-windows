@@ -1522,3 +1522,53 @@ html[data-theme='dark'] .error-text { color: #ff8a80; }
 .dict-check > span { color: var(--fg) !important; font-size: 13px !important; }
 .dict-help { flex-basis: 100%; font-size: 12px; color: var(--muted); line-height: 1.6; }
 @media (max-width: 700px) { .dict-summary { display: none; } }
+
+/* ---------------------------------------------------------------- backlit */
+
+/*
+ * The Suprasūtā "backlit" touch, kept quiet for a reading app: what is
+ * selected, and what floats above the page, glows faintly orange behind the
+ * blue accent. Everything else stays calm. (The Astrology app's coloured
+ * cards and bright palette are deliberately not used here.)
+ */
+:root {
+  --backlit-ring: rgba(255, 150, 60, 0.55);
+  --backlit-glow: rgba(255, 140, 40, 0.42);
+  --backlit-soft: rgba(255, 140, 40, 0.16);
+  --backlit-edge: rgba(15, 108, 189, 0.45);
+}
+html[data-theme='dark'] {
+  --backlit-ring: rgba(255, 160, 80, 0.6);
+  --backlit-glow: rgba(255, 150, 60, 0.38);
+  --backlit-soft: rgba(255, 150, 60, 0.14);
+  --backlit-edge: rgba(76, 163, 240, 0.5);
+}
+
+/* Selected: menu titles and items, mode buttons, pressed toolbar buttons. */
+.menu-title.on,
+.menu-item:hover,
+.segmented button.on,
+button.tb.on,
+.tb.tb-dictate.on {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 12px var(--backlit-glow);
+  border-color: var(--accent);
+  position: relative;
+  z-index: 1;
+}
+.menu-item:hover .menu-accel { color: rgba(255, 255, 255, 0.8); }
+
+/* Popups: menus, dialogs, floating toolbars and bars. */
+.menu-dropdown,
+.modal,
+.sel-toolbar,
+.format-toolbar,
+.note-tip,
+.reader-panel,
+.dictation-panel,
+.cmp-ai {
+  border-color: var(--backlit-edge);
+  box-shadow: var(--shadow), 0 0 0 1px var(--backlit-edge), 0 0 26px var(--backlit-soft);
+}
+.dictation-panel { box-shadow: 0 -6px 22px var(--backlit-soft); }
