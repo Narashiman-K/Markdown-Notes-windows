@@ -12,6 +12,7 @@ import {
   Dictation,
   MODEL_SIZES_MB,
   INDIC_SIZE_MB,
+  INDIC_LARGE_SIZE_MB,
   engineFor,
   modelCachedFor,
   listSavedModels,
@@ -124,10 +125,11 @@ export default function DictationPanel(props: Props): React.JSX.Element {
 
   const set = (patch: Partial<DictationSettings>): void => props.onSettings({ ...settings, ...patch })
   const engine = engineFor(settings)
-  const size = engine.kind === 'indic' ? { cpu: INDIC_SIZE_MB, gpu: INDIC_SIZE_MB } : MODEL_SIZES_MB[settings.model]
+  const indicMb = engine.kind === 'indic' && engine.large ? INDIC_LARGE_SIZE_MB : INDIC_SIZE_MB
+  const size = engine.kind === 'indic' ? { cpu: indicMb, gpu: indicMb } : MODEL_SIZES_MB[settings.model]
 
   const langName = DICTATION_LANGUAGES.find(([c]) => c === settings.language)?.[1] ?? settings.language
-  const engineName = engine.kind === 'indic' ? 'Indian-language model' : settings.model === 'small' ? 'Accurate' : 'Fast'
+  const engineName = engine.kind === 'indic' ? (engine.large ? 'Indian languages, Accurate' : 'Indian languages, Fast') : settings.model === 'small' ? 'Accurate' : 'Fast'
   const summary = `${engineName} · ${langName}${settings.translate ? ' → English' : ''}${settings.commands ? ' · commands on' : ''}`
 
   // A slim bar docked above the status bar: it takes its own row, so the
@@ -156,7 +158,7 @@ export default function DictationPanel(props: Props): React.JSX.Element {
           </button>
         )}
         <div className="dict-status">
-          <span className="dict-state">{state === 'error' ? detail || STATE_TEXT.error : STATE_TEXT[state]}</span>
+          <span className="dict-state">{state === 'error' ? detail || STATE_TEXT.error : state === 'transcribing' && detail ? detail : STATE_TEXT[state]}</span>
           {progress && progress.total > 0 ? (
             <span className="dict-progress" title="One-time download">
               <span className="dict-progress-fill" style={{ width: `${Math.min(100, (progress.loaded / progress.total) * 100)}%` }} />
@@ -191,12 +193,12 @@ export default function DictationPanel(props: Props): React.JSX.Element {
           <label
             title={
               engine.kind === 'indic'
-                ? 'Indian languages use AI4Bharat IndicConformer, made for Indian speech; this choice applies to English and other languages'
+                ? 'Indian languages use AI4Bharat IndicConformer. Fast: one model per language (~131 MB). Accurate: one larger model for all 22 Indian languages (~700 MB, downloaded once).'
                 : 'Accurate copes better with accents and noise; Fast suits older PCs'
             }
           >
             <span>Model</span>
-            <select value={settings.model} onChange={(e) => set({ model: e.target.value as DictationSettings['model'] })} disabled={listening || engine.kind === 'indic'}>
+            <select value={settings.model} onChange={(e) => set({ model: e.target.value as DictationSettings['model'] })} disabled={listening}>
               <option value="base">Fast</option>
               <option value="small">Accurate</option>
             </select>
@@ -211,7 +213,10 @@ export default function DictationPanel(props: Props): React.JSX.Element {
               ))}
             </select>
           </label>
-          <label className="dict-check" title="Speak any language, get English text">
+          <label
+            className="dict-check"
+            title={engine.kind === 'indic' ? 'Indian languages are translated by the AI set up in the AI panel (Ollama is free and offline)' : 'Speak any language, get English text'}
+          >
             <input type="checkbox" checked={settings.translate} onChange={(e) => set({ translate: e.target.checked })} />
             <span>Translate to English</span>
           </label>

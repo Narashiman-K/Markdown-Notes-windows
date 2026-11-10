@@ -51,16 +51,33 @@ export const INDIC_SIZE_MB = 140
  * Which engine reads this setting. Translation to English, automatic
  * language detection and non-Indian languages stay with Whisper.
  */
-export function engineFor(s: DictationSettings): { kind: 'indic'; language: string } | { kind: 'whisper'; model: DictationModel } {
-  return INDIC_LANGUAGES.has(s.language) && !s.translate ? { kind: 'indic', language: s.language } : { kind: 'whisper', model: s.model }
+export type Engine =
+  | { kind: 'indic'; language: string; large: boolean }
+  | { kind: 'whisper'; model: DictationModel }
+
+/**
+ * Indian languages always use IndicConformer: Fast = one model per language
+ * (~131 MB), Accurate = AI4Bharat's 600M multilingual model with RNN-T
+ * decoding (~700 MB once, all 22 languages). Translation of an Indian
+ * language is done afterwards by the app's AI (see DictationHost.translate),
+ * because Whisper's translation of these languages is unreliable.
+ */
+export function engineFor(s: DictationSettings): Engine {
+  return INDIC_LANGUAGES.has(s.language)
+    ? { kind: 'indic', language: s.language, large: s.model === 'small' }
+    : { kind: 'whisper', model: s.model }
 }
+
+export const INDIC_LARGE_SIZE_MB = 700
 
 /** Whether the model this setting needs has been downloaded already (null = unknown). */
 export async function modelCachedFor(s: DictationSettings): Promise<boolean | null> {
   try {
     const e = engineFor(s)
     const [cacheName, needle] =
-      e.kind === 'indic' ? ['indic-asr-cache', `indicconformer-${e.language}-onnx/resolve/main/model.int8.onnx`] : ['transformers-cache', MODEL_IDS[e.model]]
+      e.kind === 'indic'
+        ? ['indic-asr-cache', e.large ? 'indic-conformer-600m-int8-onnx/resolve/main/assets/encoder.onnx' : `indicconformer-${e.language}-onnx/resolve/main/model.int8.onnx`]
+        : ['transformers-cache', MODEL_IDS[e.model]]
     const keys = await (await caches.open(cacheName)).keys()
     return keys.some((r) => r.url.includes(needle) && r.url.includes('.onnx'))
   } catch {
@@ -96,8 +113,15 @@ export async function listSavedModels(): Promise<SavedModel[]> {
       }
       return sizes
     }
-    const indic = await sum('indic-asr-cache', (u) => /indicconformer-([a-z]+)-onnx/.exec(u)?.[1] ?? null)
-    for (const [lang, bytes] of indic) out.push({ id: `indic:${lang}`, label: `${LANGUAGE_NAMES[lang] ?? lang} (Indian-language model)`, sizeMb: Math.round(bytes / 1048576) })
+    const indic = await sum('indic-asr-cache', (u) =>
+      /indic-conformer-600m/.test(u) ? 'large' : (/indicconformer-([a-z]+)-onnx/.exec(u)?.[1] ?? null)
+    )
+    for (const [lang, bytes] of indic)
+      out.push({
+        id: `indic:${lang}`,
+        label: lang === 'large' ? 'All Indian languages, Accurate' : `${LANGUAGE_NAMES[lang] ?? lang}, Fast`,
+        sizeMb: Math.round(bytes / 1048576)
+      })
     const whisper = await sum('transformers-cache', (u) => (/whisper-small/.test(u) ? 'small' : /whisper-base/.test(u) ? 'base' : null))
     for (const [m, bytes] of whisper) out.push({ id: `whisper:${m}`, label: m === 'small' ? 'English and other languages, Accurate' : 'English and other languages, Fast', sizeMb: Math.round(bytes / 1048576) })
   } catch {
@@ -110,7 +134,7 @@ export async function listSavedModels(): Promise<SavedModel[]> {
 export async function deleteSavedModel(id: string): Promise<void> {
   const [kind, key] = id.split(':')
   const cache = await caches.open(kind === 'indic' ? 'indic-asr-cache' : 'transformers-cache')
-  const needle = kind === 'indic' ? `indicconformer-${key}-onnx` : `whisper-${key}`
+  const needle = kind === 'indic' ? (key === 'large' ? 'indic-conformer-600m' : `indicconformer-${key}-onnx`) : `whisper-${key}`
   for (const req of await cache.keys()) if (req.url.includes(needle)) await cache.delete(req)
 }
 
@@ -121,7 +145,7 @@ export function keepModelsSaved(): void {
 
 const engineKey = (s: DictationSettings): string => {
   const e = engineFor(s)
-  return e.kind === 'indic' ? `indic:${e.language}` : `whisper:${e.model}`
+  return e.kind === 'indic' ? `indic:${e.large ? 'large' : 'small'}:${e.language}` : `whisper:${e.model}`
 }
 
 export interface DictationHost {
@@ -129,6 +153,8 @@ export interface DictationHost {
   remoteHost?: string
   /** Let transformers.js keep its own copy in the browser cache. */
   useBrowserCache: boolean
+  /** Translates dictated Indian-language text to English with the app's AI. */
+  translate?: (text: string, language: string) => Promise<string>
 }
 
 export interface DictationEvents {
@@ -150,6 +176,8 @@ export class Dictation {
   private nextId = 1
   private levelTimer: number | null = null
   private paused = false
+  private translating = 0
+  private translateChain: Promise<void> = Promise.resolve()
   private files = new Map<string, { loaded: number; total: number }>()
   device: 'webgpu' | 'wasm' | null = null
 
@@ -179,9 +207,13 @@ export class Dictation {
     if (this.worker && this.ready) return Promise.resolve()
     if (!this.worker) {
       this.worker =
-        engineFor(this.settings).kind === 'indic'
-          ? new Worker(new URL('./indicWorker.ts', import.meta.url), { type: 'module' })
-          : new Worker(new URL('./whisperWorker.ts', import.meta.url), { type: 'module' })
+        (() => {
+          const e = engineFor(this.settings)
+          if (e.kind === 'whisper') return new Worker(new URL('./whisperWorker.ts', import.meta.url), { type: 'module' })
+          return e.large
+            ? new Worker(new URL('./indicLargeWorker.ts', import.meta.url), { type: 'module' })
+            : new Worker(new URL('./indicWorker.ts', import.meta.url), { type: 'module' })
+        })()
       this.worker.onmessage = (e) => this.onWorker(e.data)
       // A worker that fails to start at all (its script could not load) never
       // answers; without this the panel would wait for ever.
@@ -225,6 +257,43 @@ export class Dictation {
     } else if (m.type === 'result') {
       this.busy = false
       const heard = cleanTranscript(String(m.text ?? ''))
+      const engine = engineFor(this.settings)
+      if (heard && this.settings.translate && engine.kind === 'indic') {
+        // Commands are applied in the spoken language first (so "पूर्ण विराम"
+        // still ends the sentence), then the text is translated.
+        const translate = this.host.translate
+        const spoken = toActions(heard, this.settings.commands)
+        if (!translate) {
+          this.events.onState('error', 'Translating Indian languages uses the AI set up in the AI panel (Ollama is free and offline). Set it up there, or untick Translate to English.')
+          this.events.onActions(spoken, heard)
+          this.pump()
+          return
+        }
+        // Translation can take a while with a local model, so listening and
+        // transcribing carry on meanwhile; translations are written in the
+        // order they were spoken.
+        this.translating++
+        this.events.onState('transcribing', 'Translating…')
+        this.translateChain = this.translateChain.then(async () => {
+          const out: DictationAction[] = []
+          for (const a of spoken) {
+            if (a.kind !== 'text') out.push(a)
+            else {
+              try {
+                out.push({ kind: 'text', text: await translate(a.text, engine.language) })
+              } catch (err) {
+                this.events.onState('error', `Translation failed: ${err instanceof Error ? err.message : String(err)}`)
+                out.push(a)
+              }
+            }
+          }
+          this.translating--
+          this.events.onActions(out, heard)
+          if (!this.busy && !this.queue.length && !this.translating) this.events.onState(this.stream ? (this.paused ? 'paused' : 'listening') : 'idle')
+        })
+        this.pump()
+        return
+      }
       if (heard) this.events.onActions(toActions(heard, this.settings.commands), heard)
       this.pump()
     } else if (m.type === 'error') {
@@ -319,7 +388,7 @@ export class Dictation {
     if (this.busy || !this.worker || !this.ready) return
     const audio = this.queue.shift()
     if (!audio) {
-      this.events.onState(this.stream ? (this.paused ? 'paused' : 'listening') : 'idle')
+      if (!this.translating) this.events.onState(this.stream ? (this.paused ? 'paused' : 'listening') : 'idle')
       return
     }
     this.busy = true

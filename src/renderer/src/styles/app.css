@@ -1499,6 +1499,9 @@ html[data-theme='dark'] .error-text { color: #ff8a80; }
   transition: transform 90ms linear; pointer-events: none;
 }
 .dict-mic:not(.on) .dict-level { display: none; }
+/* The toolbar's dictation button: labelled, and pressed while the bar is open. */
+.tb.tb-dictate { font-weight: 600; }
+.tb.tb-dictate.on { background: #c42b1c; color: #fff; border-color: #c42b1c; }
 .dict-pause { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--chrome-border); background: var(--bg); color: var(--fg); cursor: pointer; font-size: 13px; padding: 0; display: grid; place-items: center; }
 .dict-pause:hover { border-color: var(--accent); }
 .dict-saved { display: flex; align-items: center; gap: 12px; margin-top: 4px; color: var(--fg); }

@@ -81,8 +81,10 @@ describe('dictation commands', () => {
 describe('Indian-language engine', () => {
   it('chooses IndicConformer for Indian languages, Whisper otherwise', async () => {
     const { engineFor, DEFAULT_DICTATION: D } = await import('../src/renderer/src/lib/speech/dictation')
-    expect(engineFor({ ...D, language: 'kn' })).toEqual({ kind: 'indic', language: 'kn' })
-    expect(engineFor({ ...D, language: 'kn', translate: true }).kind).toBe('whisper')
+    expect(engineFor({ ...D, language: 'kn' })).toEqual({ kind: 'indic', language: 'kn', large: false })
+    expect(engineFor({ ...D, language: 'kn', model: 'small' })).toEqual({ kind: 'indic', language: 'kn', large: true })
+    // Translation of an Indian language is done by the AI afterwards, not by Whisper.
+    expect(engineFor({ ...D, language: 'kn', translate: true }).kind).toBe('indic')
     expect(engineFor({ ...D, language: 'auto' }).kind).toBe('whisper')
     expect(engineFor({ ...D, language: 'fr' }).kind).toBe('whisper')
   })
