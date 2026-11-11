@@ -106,24 +106,81 @@ export class NaturalVoice {
     return this.ready
   }
 
-  /** Audio for a sentence; asking again with the same key reuses the first request. */
-  make(key: string, text: string, voice: string, speed: number): Promise<{ samples: Float32Array; rate: number }> {
+  /**
+   * Audio for a sentence; asking again with the same key reuses the first
+   * request. Requests wait in a queue here and go to the worker one at a time,
+   * so the worker is never idle while there is reading ahead to do, and
+   * `urgent` (the sentence about to be read) jumps the queue.
+   */
+  make(key: string, text: string, voice: string, speed: number, urgent = false): Promise<{ samples: Float32Array; rate: number }> {
     const hit = this.made.get(key)
-    if (hit) return hit
-    const p = this.load().then(
-      () =>
-        new Promise<{ samples: Float32Array; rate: number }>((resolve, reject) => {
-          const id = this.nextId++
-          this.pending.set(id, { resolve, reject })
-          this.worker!.postMessage({ type: 'speak', id, text, voice, speed })
-        })
-    )
+    if (hit) {
+      // Already queued but not started: move it to the front if it is needed now.
+      const qi = urgent ? this.queue.findIndex((q) => q.key === key) : -1
+      if (qi > 0) this.queue.unshift(...this.queue.splice(qi, 1))
+      return hit
+    }
+    const p = new Promise<{ samples: Float32Array; rate: number }>((resolve, reject) => {
+      const job = { key, text, voice, speed, resolve, reject }
+      if (urgent) this.queue.unshift(job)
+      else this.queue.push(job)
+    })
     this.made.set(key, p)
+    this.pump()
     return p
+  }
+
+  private queue: Array<{ key: string; text: string; voice: string; speed: number } & Pending> = []
+  private busy = false
+
+  private pump(): void {
+    if (this.busy || !this.queue.length) return
+    this.busy = true
+    const job = this.queue.shift()!
+    const done = (): void => {
+      this.busy = false
+      this.pump()
+    }
+    this.load().then(
+      () => {
+        const id = this.nextId++
+        this.pending.set(id, {
+          resolve: (a) => {
+            job.resolve(a)
+            done()
+          },
+          reject: (e) => {
+            job.reject(e)
+            done()
+          }
+        })
+        this.worker!.postMessage({ type: 'speak', id, text: job.text, voice: job.voice, speed: job.speed })
+      },
+      (e: Error) => {
+        job.reject(e)
+        for (const q of this.queue.splice(0)) q.reject(e)
+        this.busy = false
+      }
+    )
+  }
+
+  /**
+   * Keep only the sentences in `keep` (the one being read and those just
+   * ahead): waiting requests for others are dropped, and audio already made
+   * for them is let go, so a jump starts at once and memory stays small.
+   */
+  keepOnly(keep: Set<string>): void {
+    for (const q of [...this.queue]) {
+      if (keep.has(q.key)) continue
+      this.queue.splice(this.queue.indexOf(q), 1)
+      q.reject(new Error('Skipped.'))
+    }
+    for (const k of [...this.made.keys()]) if (!keep.has(k)) this.made.delete(k)
   }
 
   /** Forget audio made ahead (the voice or speed changed). */
   forget(): void {
+    for (const q of this.queue.splice(0)) q.reject(new Error('Skipped.'))
     this.made.clear()
   }
 
@@ -198,6 +255,8 @@ export class NaturalVoice {
     this.worker = null
     this.ready = null
     this.made.clear()
+    // Empty the queue first, so rejecting the job in flight starts nothing new.
+    for (const q of this.queue.splice(0)) q.reject(new Error('Stopped.'))
     for (const p of this.pending.values()) p.reject(new Error('Stopped.'))
     this.pending.clear()
   }

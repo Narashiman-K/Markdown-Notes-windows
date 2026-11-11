@@ -359,7 +359,9 @@ export interface ReadEvents {
 
 /** What read aloud needs from the natural-voice engine (see naturalVoice.ts). */
 export interface NaturalEngine {
-  make(key: string, text: string, voice: string, speed: number): Promise<{ samples: Float32Array; rate: number }>
+  make(key: string, text: string, voice: string, speed: number, urgent?: boolean): Promise<{ samples: Float32Array; rate: number }>
+  /** Drop queued and made audio for sentences not in `keep`. */
+  keepOnly?(keep: Set<string>): void
   play(a: { samples: Float32Array; rate: number }, opts: { volume: number; detuneCents: number }, onStart: (durationS: number) => void): Promise<void>
   pause(): void
   resume(): void
@@ -367,6 +369,9 @@ export interface NaturalEngine {
   forget(): void
   currentTime(): number
 }
+
+/** Sentences prepared ahead of the one being read (natural voices). */
+const LOOKAHEAD = 8
 
 const SENTENCE_HL = 'mn-read-sentence'
 const WORD_HL = 'mn-read-word'
@@ -521,15 +526,19 @@ export class ReadAloud {
     this.mark(s, null)
     this.scrollTo(s)
     this.events.onSentence(this.index, this.sentences.length)
-    const audio = n.make(key, s.spoken, this.opts.naturalVoice, speed)
-    // Make the next two sentences while this one plays, so there is no gap.
-    for (let k = 1; k <= 2; k++) {
+    // Keep the engine busy preparing the sentences ahead, so they are ready
+    // before they are needed; drop anything left over from before a jump.
+    const ahead: Array<{ key: string; text: string; speed: number }> = []
+    for (let k = 1; k <= LOOKAHEAD; k++) {
       const nx = this.sentences[this.index + k]
       if (nx && this.useNatural(nx)) {
         const q = this.naturalParams(nx)
-        void n.make(q.key, nx.spoken, this.opts.naturalVoice, q.speed).catch(() => undefined)
+        ahead.push({ key: q.key, text: nx.spoken, speed: q.speed })
       }
     }
+    n.keepOnly?.(new Set([key, ...ahead.map((a) => a.key)]))
+    const audio = n.make(key, s.spoken, this.opts.naturalVoice, speed, true)
+    for (const a of ahead) void n.make(a.key, a.text, this.opts.naturalVoice, a.speed).catch(() => undefined)
     let waiting = true
     const slow = window.setTimeout(() => {
       if (waiting && token === this.token) this.events.onPreparing?.(true)
@@ -589,6 +598,11 @@ export class ReadAloud {
         window.clearTimeout(slow)
         this.events.onPreparing?.(false)
         if (token !== this.token) return
+        // Dropped from the queue (the voice changed while waiting): ask again.
+        if (err instanceof Error && err.message === 'Skipped.') {
+          this.speak()
+          return
+        }
         // No usable graphics chip, or the model could not load: carry on with
         // the computer's own voices rather than stopping.
         this.naturalFailed = true
