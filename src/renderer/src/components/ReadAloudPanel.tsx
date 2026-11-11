@@ -20,7 +20,7 @@ import {
   type ReadState,
   type StyleId
 } from '../lib/speech/readAloud'
-import { NaturalVoice, NATURAL_VOICES, NATURAL_MODEL_MB } from '../lib/speech/naturalVoice'
+import { NaturalVoice, NATURAL_VOICES, NATURAL_MODEL_MB, NATURAL_VOICES_READY } from '../lib/speech/naturalVoice'
 
 interface Props {
   options: ReadOptions
@@ -55,6 +55,8 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
   const [preparing, setPreparing] = useState(false)
   const [download, setDownload] = useState<{ l: number; t: number } | null>(null)
   const [gpuOk, setGpuOk] = useState<boolean | null>(null)
+  /** Natural voices are off (not ready yet, or no usable graphics chip). */
+  const naturalOff = !NATURAL_VOICES_READY || gpuOk === false
   const player = useRef<ReadAloud | null>(null)
   const natural = useRef<NaturalVoice | null>(null)
   const sleepTimer = useRef<number | null>(null)
@@ -83,8 +85,8 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
   useEffect(() => {
     // Without a usable graphics chip, natural voices are too slow to read
     // live; the computer's voices are used instead.
-    player.current?.setOptions(gpuOk === false ? { ...options, engine: 'system' } : options)
-  }, [options, gpuOk])
+    player.current?.setOptions(naturalOff ? { ...options, engine: 'system' } : options)
+  }, [options, naturalOff])
 
   useEffect(() => {
     const load = (): void => setVoices(speechSynthesis.getVoices())
@@ -190,12 +192,12 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
         </div>
         <label className="read-inline" title={options.engine === 'natural' ? 'Natural voice (English)' : 'Voice'}>
           <select
-            value={options.engine === 'natural' && gpuOk !== false ? options.naturalVoice : 'system'}
+            value={options.engine === 'natural' && !naturalOff ? options.naturalVoice : 'system'}
             onChange={(e) =>
               e.target.value === 'system' ? set({ engine: 'system' }) : set({ engine: 'natural', naturalVoice: e.target.value })
             }
           >
-            {gpuOk !== false && (
+            {!naturalOff && (
               <>
                 <optgroup label="Natural voices (English)">
                   {NATURAL_VOICES.filter((v) => v.gender === 'Female').map((v) => (
@@ -317,8 +319,10 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
       )}
       {info && (
         <div className="read-info-pop" role="note">
-          {gpuOk === false
-            ? 'Natural voices need a graphics chip that this computer does not offer; the computer’s own voices are used.'
+          {!NATURAL_VOICES_READY
+            ? 'Reading uses this computer’s voices. More natural voices are coming in an update.'
+            : gpuOk === false
+            ?'Natural voices need a graphics chip that this computer does not offer; the computer’s own voices are used.'
             : `Natural voices: Kokoro, free and offline after a one-time ${NATURAL_MODEL_MB} MB download; English for now (other languages are read by the computer’s voices).`}{' '}
           More computer voices: Windows Settings → Time &amp; language → Speech → Add voices. Changes apply from the next sentence.
         </div>

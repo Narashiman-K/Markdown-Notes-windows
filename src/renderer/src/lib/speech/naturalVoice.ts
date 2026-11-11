@@ -29,6 +29,13 @@ export const NATURAL_VOICES: NaturalVoiceInfo[] = [
 
 export const NATURAL_MODEL_MB = 114
 
+/**
+ * Off until the Book2Audio voice engine (being moved from Python to Node) can
+ * be built in; this Kokoro build sounded unnatural. Reading uses the
+ * computer's voices meanwhile. Flip to true to bring the voices back.
+ */
+export const NATURAL_VOICES_READY = false
+
 export interface NaturalEvents {
   onProgress: (loadedMb: number, totalMb: number) => void
 }
