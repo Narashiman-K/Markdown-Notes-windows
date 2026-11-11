@@ -38,6 +38,15 @@ const SLEEP_CHOICES: Array<[number, string]> = [
   [60, '1 hour']
 ]
 
+/**
+ * The computer's voices that sound natural (Windows "Natural"/neural and
+ * online voices). The classic voices (David, Zira, Heera…) sound robotic and
+ * are not offered.
+ */
+function naturalSystemVoices(): SpeechSynthesisVoice[] {
+  return speechSynthesis.getVoices().filter((v) => /natural|neural/i.test(v.name))
+}
+
 function documentRoot(): { root: HTMLElement | null; scroller: HTMLElement | null } {
   const root = document.querySelector('.preview-host .markdown-body') as HTMLElement | null
   return { root, scroller: (root?.closest('.preview-scroll') as HTMLElement | null) ?? null }
@@ -85,11 +94,14 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
   useEffect(() => {
     // Without a usable graphics chip, natural voices are too slow to read
     // live; the computer's voices are used instead.
-    player.current?.setOptions(naturalOff ? { ...options, engine: 'system' } : options)
-  }, [options, naturalOff])
+    // A saved choice of a hidden (robotic) voice falls back to a natural one.
+    const known = !options.voiceURI || voices.some((v) => v.voiceURI === options.voiceURI)
+    const o = known ? options : { ...options, voiceURI: null }
+    player.current?.setOptions(naturalOff ? { ...o, engine: 'system' } : !voices.length ? { ...o, engine: 'natural' } : o)
+  }, [options, naturalOff, voices])
 
   useEffect(() => {
-    const load = (): void => setVoices(speechSynthesis.getVoices())
+    const load = (): void => setVoices(naturalSystemVoices())
     load()
     speechSynthesis.addEventListener('voiceschanged', load)
     return () => {
@@ -133,6 +145,35 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
     if (sleep > 0) sleepTimer.current = window.setTimeout(() => player.current?.stop(), sleep * 60_000)
   }
 
+  // Double-click any sentence in the document to read from there on.
+  useEffect(() => {
+    const onDbl = (e: MouseEvent): void => {
+      const { root, scroller } = documentRoot()
+      if (!root || !(e.target instanceof Node) || !root.contains(e.target)) return
+      const caret = document.caretRangeFromPoint?.(e.clientX, e.clientY)
+      if (!caret) return
+      const sentences = collectSentences(root, options)
+      const at = sentences.findIndex((s) => {
+        const r = rangeOf(s)
+        try {
+          return !!r && r.isPointInRange(caret.startContainer, caret.startOffset)
+        } catch {
+          return false
+        }
+      })
+      if (at < 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      window.getSelection()?.removeAllRanges()
+      natural.current?.unlock()
+      setNote('')
+      player.current!.load(sentences, at, scroller)
+      player.current!.play()
+    }
+    document.addEventListener('dblclick', onDbl, true)
+    return () => document.removeEventListener('dblclick', onDbl, true)
+  }, [options])
+
   const playPause = (): void => {
     const p = player.current!
     // Sound may only start from a press, so wake the audio now, not when the
@@ -158,6 +199,8 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
   })
 
   const style = READ_STYLES.find((s) => s.id === options.style) ?? READ_STYLES[0]
+  // Only natural-sounding voices are offered; the older robotic Windows
+  // voices are hidden (see naturalSystemVoices).
   const english = voices.filter((v) => /^en/i.test(v.lang))
   const others = voices.filter((v) => !/^en/i.test(v.lang))
 
@@ -185,14 +228,14 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
               : preparing
                 ? 'Preparing the voice…'
                 : state === 'idle'
-                  ? 'Press ▶ to read from the top of the screen, or select text first.'
+                  ? 'Press ▶ to read from the top of the screen, or double-click where to start.'
                   : `${state === 'paused' ? 'Paused · ' : ''}Sentence ${pos.i + 1} of ${pos.n}`}
           </span>
           {note && <span className="dict-note">{note}</span>}
         </div>
         <label className="read-inline" title={options.engine === 'natural' ? 'Natural voice (English)' : 'Voice'}>
           <select
-            value={options.engine === 'natural' && !naturalOff ? options.naturalVoice : 'system'}
+            value={(options.engine === 'natural' || !voices.length) && !naturalOff ? options.naturalVoice : 'system'}
             onChange={(e) =>
               e.target.value === 'system' ? set({ engine: 'system' }) : set({ engine: 'natural', naturalVoice: e.target.value })
             }
@@ -215,7 +258,12 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
                 </optgroup>
               </>
             )}
-            <option value="system">This computer's voices (all languages)</option>
+            {voices.length > 0 && <option value="system">Windows natural voices</option>}
+            {naturalOff && !voices.length && (
+              <option value="system" disabled>
+                Natural voices are not available on this computer
+              </option>
+            )}
           </select>
         </label>
         <label className="read-inline" title="Reading style">
@@ -250,10 +298,10 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
 
       {more && (
         <div className="dict-options">
-          <label title="Higher or lower voice (computer voices only: natural voices keep their own pitch so they stay human)">
+          {voices.length > 0 && <label title="Higher or lower voice (Windows voices only: Kokoro voices keep their own pitch so they stay human)">
             <span>Pitch</span>
             <input type="range" min={0.6} max={1.6} step={0.05} value={options.pitch} onChange={(e) => set({ pitch: Number(e.target.value) })} />
-          </label>
+          </label>}
           <label>
             <span>Volume</span>
             <input type="range" min={0} max={1} step={0.05} value={options.volume} onChange={(e) => set({ volume: Number(e.target.value) })} />
@@ -267,10 +315,11 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
             <input type="checkbox" checked={options.sentiment} onChange={(e) => set({ sentiment: e.target.checked })} />
             <span>Follow the mood of each sentence</span>
           </label>
-          <label title="Used for other languages, and for everything when “This computer's voices” is chosen">
-            <span>Computer voice</span>
-            <select value={options.voiceURI ?? ''} onChange={(e) => set({ voiceURI: e.target.value || null })}>
-              <option value="">System default</option>
+          {voices.length > 0 && (
+          <>
+          <label title="Windows natural voices, used for other languages and when “Windows natural voices” is chosen">
+            <span>Windows voice</span>
+            <select value={options.voiceURI ?? voices[0].voiceURI} onChange={(e) => set({ voiceURI: e.target.value || null })}>
               <optgroup label="English">
                 {english.map((v) => (
                   <option key={v.voiceURI} value={v.voiceURI}>
@@ -293,6 +342,8 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
             <input type="checkbox" checked={options.autoLanguage} onChange={(e) => set({ autoLanguage: e.target.checked })} />
             <span>Switch voice for other languages</span>
           </label>
+          </>
+          )}
           <label className="dict-check">
             <input type="checkbox" checked={options.skipCode} onChange={(e) => set({ skipCode: e.target.checked })} />
             <span>Skip code</span>
@@ -323,8 +374,8 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
             ? 'Reading uses this computer’s voices. More natural voices are coming in an update.'
             : gpuOk === false
             ?'Natural voices need a graphics chip that this computer does not offer; the computer’s own voices are used.'
-            : `Natural voices: Kokoro, free and offline after a one-time ${NATURAL_MODEL_MB} MB download; English for now (other languages are read by the computer’s voices).`}{' '}
-          More computer voices: Windows Settings → Time &amp; language → Speech → Add voices. Changes apply from the next sentence.
+            : `Natural voices: Kokoro, free and offline after a one-time ${NATURAL_MODEL_MB} MB download; English for now, more languages coming.`}{' '}
+          Double-click any sentence to read from there. Changes apply from the next sentence.
         </div>
       )}
     </div>

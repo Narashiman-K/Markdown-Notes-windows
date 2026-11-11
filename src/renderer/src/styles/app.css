@@ -1527,20 +1527,20 @@ html[data-theme='dark'] .error-text { color: #ff8a80; }
 
 /*
  * The Suprasūtā "backlit" touch, kept quiet for a reading app: what is
- * selected, and what floats above the page, glows faintly orange behind the
+ * selected, and what floats above the page, glows faintly sky-blue behind the
  * blue accent. Everything else stays calm. (The Astrology app's coloured
  * cards and bright palette are deliberately not used here.)
  */
 :root {
-  --backlit-ring: rgba(255, 150, 60, 0.55);
-  --backlit-glow: rgba(255, 140, 40, 0.42);
-  --backlit-soft: rgba(255, 140, 40, 0.16);
+  --backlit-ring: rgba(56, 152, 236, 0.55);
+  --backlit-glow: rgba(56, 152, 236, 0.40);
+  --backlit-soft: rgba(56, 152, 236, 0.14);
   --backlit-edge: rgba(15, 108, 189, 0.45);
 }
 html[data-theme='dark'] {
-  --backlit-ring: rgba(255, 160, 80, 0.6);
-  --backlit-glow: rgba(255, 150, 60, 0.38);
-  --backlit-soft: rgba(255, 150, 60, 0.14);
+  --backlit-ring: rgba(120, 190, 255, 0.6);
+  --backlit-glow: rgba(100, 175, 255, 0.38);
+  --backlit-soft: rgba(100, 175, 255, 0.14);
   --backlit-edge: rgba(76, 163, 240, 0.5);
 }
 
@@ -1611,6 +1611,6 @@ button.tb.on,
 
 /* What is being read: the sentence, and the word where the voice reports it. */
 ::highlight(mn-read-sentence) { background-color: rgba(255, 190, 40, 0.28); }
-::highlight(mn-read-word) { background-color: rgba(15, 108, 189, 0.35); text-decoration: underline; text-decoration-color: rgba(255, 140, 40, 0.9); }
+::highlight(mn-read-word) { background-color: rgba(15, 108, 189, 0.35); text-decoration: underline; text-decoration-color: rgba(56, 152, 236, 0.95); }
 html[data-theme='dark'] ::highlight(mn-read-sentence) { background-color: rgba(255, 190, 40, 0.22); }
 html[data-theme='dark'] ::highlight(mn-read-word) { background-color: rgba(76, 163, 240, 0.4); }
