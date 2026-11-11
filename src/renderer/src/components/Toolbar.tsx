@@ -9,6 +9,8 @@ interface Props {
   aiOpen: boolean
   /** The dictation bar is open (the button shows as pressed). */
   dictationOpen?: boolean
+  /** The read-aloud bar is open. */
+  readOpen?: boolean
   /**
    * Scanned pages' own pictures: 'none' when the document keeps none, and the
    * button is not shown; otherwise whether they are showing.
@@ -40,6 +42,7 @@ export default function Toolbar(props: Props): React.JSX.Element {
         {btn('file:merge', '⧉ Merge docs', 'Merge files: combine several documents into one', 'tb-text')}
         {btn('file:compare', '⇆ Compare', 'Compare documents: see every difference side by side', 'tb-text')}
         {btn('edit:dictateBar', '🎙 Dictate', props.dictationOpen ? 'Close the dictation bar' : 'Dictation: type with your voice (open the bar, then press the microphone or Ctrl+Shift+D)', `tb-text tb-dictate${props.dictationOpen ? ' on' : ''}`)}
+        {btn('view:readAloud', '🔊 Read aloud', props.readOpen ? 'Close the read-aloud bar' : 'Read the document aloud, with each sentence highlighted (Ctrl+Shift+Space plays and pauses)', `tb-text tb-read${props.readOpen ? ' on' : ''}`)}
         {props.scans && props.scans !== 'none' &&
           btn(
             'view:scans',

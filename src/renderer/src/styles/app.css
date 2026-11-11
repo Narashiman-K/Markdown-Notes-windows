@@ -1574,3 +1574,36 @@ button.tb.on,
 .dictation-panel { box-shadow: 0 -6px 22px var(--backlit-soft); }
 .dict-lang-fixed { color: var(--fg); font-size: 13px; }
 .dict-soon { font-size: 11px; padding: 1px 8px; border-radius: 10px; color: var(--accent); border: 1px solid var(--backlit-edge); box-shadow: 0 0 8px var(--backlit-soft); }
+
+/* ---------------------------------------------------------------- read aloud */
+
+/* Docked like the dictation bar; reuses its row and option styles. */
+.read-panel {
+  flex: none;
+  padding: 6px 12px;
+  background: var(--chrome); color: var(--fg);
+  border-top: 1px solid var(--backlit-edge);
+  box-shadow: 0 -6px 22px var(--backlit-soft);
+  font: 13px/1.4 system-ui, 'Segoe UI', sans-serif;
+}
+.read-transport { display: flex; align-items: center; gap: 4px; flex: none; }
+.read-btn, .read-play {
+  border: 1px solid var(--chrome-border); background: var(--bg); color: var(--fg);
+  border-radius: 50%; cursor: pointer; display: grid; place-items: center; padding: 0;
+}
+.read-btn { width: 30px; height: 30px; font-size: 12px; }
+.read-btn:disabled { opacity: 0.4; cursor: default; }
+.read-play { width: 38px; height: 38px; font-size: 15px; border: 2px solid var(--accent); }
+.read-play.on { background: var(--accent); color: #fff; box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 12px var(--backlit-glow); }
+.read-inline { display: flex; align-items: center; gap: 6px; flex: none; }
+.read-inline > span { color: var(--muted); font-size: 12px; }
+.read-inline select, .read-panel .dict-options select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--chrome-border); border-radius: 6px; padding: 2px 6px; }
+.read-inline input[type='range'] { width: 90px; }
+.tb.tb-read { font-weight: 600; }
+@media (max-width: 900px) { .read-inline:not(:first-of-type) { display: none; } }
+
+/* What is being read: the sentence, and the word where the voice reports it. */
+::highlight(mn-read-sentence) { background-color: rgba(255, 190, 40, 0.28); }
+::highlight(mn-read-word) { background-color: rgba(15, 108, 189, 0.35); text-decoration: underline; text-decoration-color: rgba(255, 140, 40, 0.9); }
+html[data-theme='dark'] ::highlight(mn-read-sentence) { background-color: rgba(255, 190, 40, 0.22); }
+html[data-theme='dark'] ::highlight(mn-read-word) { background-color: rgba(76, 163, 240, 0.4); }

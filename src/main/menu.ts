@@ -174,6 +174,7 @@ export function buildMenu(win: BrowserWindow, send: Send): void {
       submenu: [
         { label: 'Ask Your Documents', accelerator: 'CmdOrCtrl+Shift+A', click: () => send('ai:toggle') },
         { label: 'Dictation', accelerator: 'CmdOrCtrl+Shift+D', click: () => send('edit:dictate') },
+        { label: 'Read aloud: play or pause', accelerator: 'CmdOrCtrl+Shift+Space', click: () => send('view:readAloud:play') },
         { type: 'separator' },
         { label: 'Summarise Document', click: () => send('ai:quick:summarise') },
         { label: 'Explain Selection', click: () => send('ai:quick:explain') },

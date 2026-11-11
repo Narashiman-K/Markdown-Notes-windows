@@ -36,6 +36,8 @@ export interface Settings {
   reader: { width: string; size: string; spacing: string; palette: string }
   /** Dictation: model size, language, translate, voice commands (renderer-checked). */
   dictation?: { model: string; language: string; translate: boolean; commands: boolean }
+  /** Read aloud options (renderer-checked). */
+  readAloud?: Record<string, unknown>
   /**
    * Languages offline OCR reads, as Tesseract codes ('eng', 'kan', 'hin').
    * Loosely typed for the same reason; the renderer cleans it on load.

@@ -675,6 +675,30 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
         'timed out'
       )
       check('dictation: the app keeps working after the panel closes', after === 'true', after)
+
+      // Read aloud: the bar opens in View mode and reads the page with the
+      // sentence highlighted (the test window is muted).
+      win.webContents.setAudioMuted(true)
+      const read = await jsWithTimeout<string>(
+        `(async () => {
+          const pause = (ms) => new Promise(r => setTimeout(r, ms));
+          document.querySelector('.tb-read')?.click();
+          await pause(600);
+          document.querySelector('.read-play')?.click();
+          let sentence = '';
+          for (let i = 0; i < 30 && !sentence; i++) { await pause(200); const h = CSS.highlights.get('mn-read-sentence'); sentence = h ? String([...h][0]) : ''; }
+          const state = document.querySelector('.read-panel .dict-state')?.textContent || '';
+          document.querySelector('.read-btn[title="Stop"]')?.click();
+          await pause(300);
+          const cleared = !CSS.highlights.get('mn-read-sentence');
+          document.querySelector('.tb-read')?.click();
+          return JSON.stringify({ sentence: sentence.slice(0, 60), state, cleared, voices: speechSynthesis.getVoices().length });
+        })()`,
+        20_000,
+        '{}'
+      )
+      const r = JSON.parse(read) as { sentence?: string; state?: string; cleared?: boolean; voices?: number }
+      check('read aloud: reads the page with the sentence highlighted', !!r.sentence && /Sentence \d+ of \d+/.test(r.state ?? '') && r.cleared === true, read)
     }
 
     // Full speech test, only on request (downloads ~125 MB the first time):
