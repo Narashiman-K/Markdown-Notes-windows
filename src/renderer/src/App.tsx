@@ -192,6 +192,10 @@ export default function App(): React.JSX.Element {
   const [dictationOpen, setDictationOpen] = useState(false)
   const [readOpen, setReadOpen] = useState(false)
   const [readToggle, setReadToggle] = useState(0)
+  // The action handler is memoised and does not list these, so it reads
+  // them through a ref: otherwise it sees a stale "open" and the toolbar
+  // button stops opening the bar after the first open and close.
+  const barsOpen = useRef({ read: false, dictation: false })
   const [readOptions, setReadOptions] = useState<ReadOptions>(DEFAULT_READ)
   const [dictationToggle, setDictationToggle] = useState(0)
   const [dictation, setDictation] = useState<DictationSettings>(DEFAULT_DICTATION)
@@ -923,7 +927,7 @@ export default function App(): React.JSX.Element {
           return
         case 'view:readAloud':
           // Reads the rendered page, so it needs View (or Reader) mode.
-          if (readOpen) setReadOpen(false)
+          if (barsOpen.current.read) setReadOpen(false)
           else {
             setMode('view')
             setReadOpen(true)
@@ -931,12 +935,12 @@ export default function App(): React.JSX.Element {
           return
         case 'view:readAloud:play':
           setMode('view')
-          if (readOpen) setReadToggle((n) => n + 1)
+          if (barsOpen.current.read) setReadToggle((n) => n + 1)
           else setReadOpen(true)
           return
         case 'edit:dictateBar':
           // The toolbar button opens and closes the bar.
-          if (dictationOpen) setDictationOpen(false)
+          if (barsOpen.current.dictation) setDictationOpen(false)
           else {
             setMode('edit')
             setDictationOpen(true)
@@ -945,7 +949,7 @@ export default function App(): React.JSX.Element {
         case 'edit:dictate':
           // Dictation types at the editor's cursor, so it needs the editor.
           setMode('edit')
-          if (dictationOpen) setDictationToggle((n) => n + 1)
+          if (barsOpen.current.dictation) setDictationToggle((n) => n + 1)
           else setDictationOpen(true)
           return
         case 'file:merge':
@@ -1303,6 +1307,7 @@ export default function App(): React.JSX.Element {
     ]
   )
 
+  barsOpen.current = { read: readOpen, dictation: dictationOpen }
   const actionRef = useRef(handleAction)
   actionRef.current = handleAction
 

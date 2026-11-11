@@ -703,6 +703,22 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       )
       const r = JSON.parse(read) as { sentence?: string; state?: string; cleared?: boolean; voices?: number }
       check('read aloud: reads the page with the sentence highlighted', !!r.sentence && /Sentence \d+ of \d+/.test(r.state ?? '') && r.cleared === true, read)
+
+      // The toolbar buttons open and close their bars every time, not just
+      // the first time (a stale "open" once made them stop responding).
+      const toggles = await jsWithTimeout<string>(
+        `(async () => {
+          const pause = (ms) => new Promise(r => setTimeout(r, ms));
+          const seen = [];
+          for (const [btn, bar] of [['.tb-read', '.read-panel'], ['.tb-dictate', '.dictation-panel']]) {
+            for (let i = 0; i < 6; i++) { document.querySelector(btn)?.click(); await pause(250); seen.push(!!document.querySelector(bar)); }
+          }
+          return JSON.stringify(seen);
+        })()`,
+        15_000,
+        '[]'
+      )
+      check('read aloud and dictation bars toggle every time', toggles === JSON.stringify([true, false, true, false, true, false, true, false, true, false, true, false]), toggles)
     }
 
     // Full speech test, only on request (downloads ~125 MB the first time):
