@@ -1614,3 +1614,48 @@ button.tb.on,
 ::highlight(mn-read-word) { background-color: rgba(15, 108, 189, 0.35); text-decoration: underline; text-decoration-color: rgba(56, 152, 236, 0.95); }
 html[data-theme='dark'] ::highlight(mn-read-sentence) { background-color: rgba(255, 190, 40, 0.22); }
 html[data-theme='dark'] ::highlight(mn-read-word) { background-color: rgba(76, 163, 240, 0.4); }
+
+/* ------------------------------------------------- backlit, everywhere
+ * One look across the whole app: every popup carries the same visible
+ * orange halo behind a blue edge, and everything selected, active or
+ * pressed glows the same way. New popups and toggles: add them here.
+ */
+:root { --backlit-halo: rgba(255, 140, 40, 0.3); }
+html[data-theme='dark'] { --backlit-halo: rgba(255, 150, 60, 0.26); }
+
+.menu-dropdown,
+.modal,
+.sel-toolbar,
+.format-toolbar,
+.note-tip,
+.reader-panel,
+.cmp-ai {
+  border-color: var(--backlit-edge);
+  box-shadow: var(--shadow), 0 0 0 1px var(--backlit-edge), 0 0 30px var(--backlit-halo);
+}
+.dictation-panel,
+.read-panel {
+  border-top: 1px solid var(--backlit-edge);
+  box-shadow: 0 -6px 26px var(--backlit-halo);
+}
+
+.reader-palette.on,
+.cmp-actions > button.on,
+.cmp-actions > button.primary,
+.annot-card.active,
+.dict-mic.on,
+.read-play.on {
+  box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 12px var(--backlit-glow);
+}
+.reader-panel button:hover:not(:disabled),
+.cmp-mode:hover,
+.cmp-mini:hover,
+.modal-actions button:hover:not(:disabled),
+.cmp-actions > button:hover:not(:disabled),
+.tb:hover:not(:disabled) {
+  box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 10px var(--backlit-soft);
+}
+.modal-actions button.primary,
+.cmp-slot button.primary {
+  box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 12px var(--backlit-glow);
+}
