@@ -27,14 +27,13 @@ export const NATURAL_VOICES: NaturalVoiceInfo[] = [
   { id: 'bm_fable', name: 'Fable', gender: 'Male', accent: 'British', note: 'warm storyteller' }
 ]
 
-export const NATURAL_MODEL_MB = 114
+export const NATURAL_MODEL_MB = 310
 
 /**
- * Off until the Book2Audio voice engine (being moved from Python to Node) can
- * be built in; this Kokoro build sounded unnatural. Reading uses the
- * computer's voices meanwhile. Flip to true to bring the voices back.
+ * Natural voices follow Book2Audio's recipe: the full-quality model and no
+ * pitch shifting. Set to false to fall back to the computer's voices only.
  */
-export const NATURAL_VOICES_READY = false
+export const NATURAL_VOICES_READY = true
 
 export interface NaturalEvents {
   onProgress: (loadedMb: number, totalMb: number) => void
@@ -61,7 +60,7 @@ export class NaturalVoice {
     try {
       const gpu = (navigator as unknown as { gpu?: { requestAdapter: () => Promise<{ features: Set<string> } | null> } }).gpu
       const adapter = gpu ? await gpu.requestAdapter() : null
-      return !!adapter && adapter.features.has('shader-f16')
+      return !!adapter // full precision needs no 16-bit support
     } catch {
       return false
     }

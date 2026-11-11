@@ -5,7 +5,7 @@
  *
  * Only a handful of voices are offered (the best-rated American and British,
  * female and male), each a 0.5 MB style file fetched when first used. The
- * model is downloaded once (114 MB, uint8f16, run on the graphics chip) and
+ * model is downloaded once (310 MB, full quality, run on the graphics chip) and
  * kept in the cache; `bundled` reads it from the app's own files instead.
  *
  * Messages in:  { type: 'load', bundled, base, wasmPaths }
@@ -55,10 +55,11 @@ async function load(m: { bundled: boolean; base: string; wasmPaths: string; voic
     env.useBrowserCache = true
   }
   tts = await KokoroTTS.from_pretrained(KOKORO_MODEL, {
-    // 8-bit weights with 16-bit maths on the graphics chip (114 MB, faster
-    // than real time). Plain fp16 gives silent (NaN) audio on WebGPU, so it is
-    // never used. 8-bit on the processor is the fallback, and much slower.
-    dtype: (m.dtype ?? (m.device === 'webgpu' ? 'uint8f16' : 'q8')) as 'q8',
+    // Full quality (fp32), the same model Book2Audio narrates with: the
+    // compressed versions sound noticeably less human. 310 MB once, faster
+    // than real time on the graphics chip. (fp16 gives silent NaN audio on
+    // WebGPU.) 8-bit on the processor is the fallback, and much slower.
+    dtype: (m.dtype ?? (m.device === 'webgpu' ? 'fp32' : 'q8')) as 'q8',
     device: m.device ?? 'wasm',
     progress_callback: (p: { status: string; file?: string; loaded?: number; total?: number }) => {
       if (p.status === 'progress') post({ type: 'progress', file: p.file, loaded: p.loaded, total: p.total })

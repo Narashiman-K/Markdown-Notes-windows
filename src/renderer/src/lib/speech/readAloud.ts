@@ -500,12 +500,14 @@ export class ReadAloud {
     this.naturalPlaying = false
   }
 
-  /** Speed and pitch for natural audio: pitch is a detune, which also speeds
-   * playback, so the voice is asked to speak slower by the same factor. */
+  /** Speed for natural audio. As in Book2Audio, the voice is never
+   * pitch-shifted: shifting a recorded voice makes it sound like a cartoon
+   * (an adult putting on a child's voice). Kokoro's own speed handles pace;
+   * pitch, emotion and mood apply to the computer's voices only. */
   private naturalParams(s: ReadSentence): { speed: number; cents: number; key: string; p: Prosody } {
     const p = prosodyFor(s, this.opts)
-    const cents = Math.round(1200 * Math.log2(p.pitch))
-    const speed = Math.max(0.5, Math.min(2, p.rate / p.pitch))
+    const cents = 0
+    const speed = Math.max(0.5, Math.min(2, p.rate))
     return { speed, cents, p, key: `${s.spoken}|${this.opts.naturalVoice}|${speed.toFixed(2)}` }
   }
 

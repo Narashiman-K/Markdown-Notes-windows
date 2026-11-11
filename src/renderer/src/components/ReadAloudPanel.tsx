@@ -250,7 +250,7 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
 
       {more && (
         <div className="dict-options">
-          <label title="Higher or lower voice">
+          <label title="Higher or lower voice (computer voices only: natural voices keep their own pitch so they stay human)">
             <span>Pitch</span>
             <input type="range" min={0.6} max={1.6} step={0.05} value={options.pitch} onChange={(e) => set({ pitch: Number(e.target.value) })} />
           </label>
