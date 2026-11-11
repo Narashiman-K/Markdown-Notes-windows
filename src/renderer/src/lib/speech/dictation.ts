@@ -36,7 +36,19 @@ export interface DictationSettings {
   commands: boolean
 }
 
-export const DEFAULT_DICTATION: DictationSettings = { model: 'base', language: 'auto', translate: false, commands: true }
+export const DEFAULT_DICTATION: DictationSettings = { model: 'base', language: 'en', translate: false, commands: true }
+
+/**
+ * English is ready; the other languages (and translation) are built but not
+ * yet accurate enough to offer. While this is false the bar offers English
+ * only and says more languages are coming; flip it to bring them back.
+ */
+export const MORE_LANGUAGES_READY = false
+
+/** The settings actually used: English only until more languages are ready. */
+export function effectiveDictation(s: DictationSettings): DictationSettings {
+  return MORE_LANGUAGES_READY ? s : { ...s, language: 'en', translate: false }
+}
 
 /**
  * Indian languages read by AI4Bharat's IndicConformer instead of Whisper.

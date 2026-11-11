@@ -1572,3 +1572,5 @@ button.tb.on,
   box-shadow: var(--shadow), 0 0 0 1px var(--backlit-edge), 0 0 26px var(--backlit-soft);
 }
 .dictation-panel { box-shadow: 0 -6px 22px var(--backlit-soft); }
+.dict-lang-fixed { color: var(--fg); font-size: 13px; }
+.dict-soon { font-size: 11px; padding: 1px 8px; border-radius: 10px; color: var(--accent); border: 1px solid var(--backlit-edge); box-shadow: 0 0 8px var(--backlit-soft); }

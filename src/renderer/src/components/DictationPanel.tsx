@@ -15,6 +15,8 @@ import {
   INDIC_LARGE_SIZE_MB,
   engineFor,
   modelCachedFor,
+  effectiveDictation,
+  MORE_LANGUAGES_READY,
   listSavedModels,
   deleteSavedModel,
   keepModelsSaved,
@@ -45,7 +47,8 @@ const STATE_TEXT: Record<DictationState, string> = {
 }
 
 export default function DictationPanel(props: Props): React.JSX.Element {
-  const { settings } = props
+  // English only for now (see MORE_LANGUAGES_READY); the saved choice is kept.
+  const settings = effectiveDictation(props.settings)
   const [state, setState] = useState<DictationState>('idle')
   const [detail, setDetail] = useState('')
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null)
@@ -123,7 +126,7 @@ export default function DictationPanel(props: Props): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const set = (patch: Partial<DictationSettings>): void => props.onSettings({ ...settings, ...patch })
+  const set = (patch: Partial<DictationSettings>): void => props.onSettings({ ...props.settings, ...patch })
   const engine = engineFor(settings)
   const indicMb = engine.kind === 'indic' && engine.large ? INDIC_LARGE_SIZE_MB : INDIC_SIZE_MB
   const size = engine.kind === 'indic' ? { cpu: indicMb, gpu: indicMb } : MODEL_SIZES_MB[settings.model]
@@ -203,23 +206,33 @@ export default function DictationPanel(props: Props): React.JSX.Element {
               <option value="small">Accurate</option>
             </select>
           </label>
-          <label>
-            <span>Language</span>
-            <select value={settings.language} onChange={(e) => set({ language: e.target.value })}>
-              {DICTATION_LANGUAGES.map(([code, name]) => (
-                <option key={code} value={code}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label
-            className="dict-check"
-            title={engine.kind === 'indic' ? 'Indian languages are translated by the AI set up in the AI panel (Ollama is free and offline)' : 'Speak any language, get English text'}
-          >
-            <input type="checkbox" checked={settings.translate} onChange={(e) => set({ translate: e.target.checked })} />
-            <span>Translate to English</span>
-          </label>
+          {MORE_LANGUAGES_READY ? (
+            <>
+              <label>
+                <span>Language</span>
+                <select value={settings.language} onChange={(e) => set({ language: e.target.value })}>
+                  {DICTATION_LANGUAGES.map(([code, name]) => (
+                    <option key={code} value={code}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label
+                className="dict-check"
+                title={engine.kind === 'indic' ? 'Indian languages are translated by the AI set up in the AI panel (Ollama is free and offline)' : 'Speak any language, get English text'}
+              >
+                <input type="checkbox" checked={settings.translate} onChange={(e) => set({ translate: e.target.checked })} />
+                <span>Translate to English</span>
+              </label>
+            </>
+          ) : (
+            <label title="Hindi, Kannada, Tamil and other languages are being tuned for accuracy and will come in an update">
+              <span>Language</span>
+              <span className="dict-lang-fixed">English</span>
+              <span className="dict-soon">More languages coming soon</span>
+            </label>
+          )}
           <label className="dict-check">
             <input type="checkbox" checked={settings.commands} onChange={(e) => set({ commands: e.target.checked })} />
             <span>Voice commands</span>
@@ -265,10 +278,14 @@ export default function DictationPanel(props: Props): React.JSX.Element {
               Say: <b>new line</b>, <b>new paragraph</b>, <b>full stop</b>, <b>comma</b>, <b>question mark</b>,{' '}
               <b>exclamation mark</b>, <b>colon</b>, <b>bullet point</b>, <b>numbered point</b>, <b>heading</b>,{' '}
               <b>open / close bracket</b>, <b>open / close quote</b>, <b>undo that</b>, <b>stop dictation</b>.
-              <br />
-              In Hindi, Kannada and Tamil: <b>पूर्ण विराम / ಪೂರ್ಣ ವಿರಾಮ / முற்றுப்புள்ளி</b> (full stop),{' '}
-              <b>अल्प विराम / ಅಲ್ಪ ವಿರಾಮ / காற்புள்ளி</b> (comma), <b>प्रश्न चिह्न / ಪ್ರಶ್ನೆ ಚಿಹ್ನೆ / கேள்விக்குறி</b> (question mark),{' '}
-              <b>नई पंक्ति / ಹೊಸ ಸಾಲು / புதிய வரி</b> (new line), <b>नया अनुच्छेद / ಹೊಸ ಪ್ಯಾರಾಗ್ರಾಫ್ / புதிய பத்தி</b> (new paragraph).
+              {MORE_LANGUAGES_READY && (
+                <>
+                  <br />
+                  In Hindi, Kannada and Tamil: <b>पूर्ण विराम / ಪೂರ್ಣ ವಿರಾಮ / முற்றுப்புள்ளி</b> (full stop),{' '}
+                  <b>अल्प विराम / ಅಲ್ಪ ವಿರಾಮ / காற்புள்ளி</b> (comma), <b>प्रश्न चिह्न / ಪ್ರಶ್ನೆ ಚಿಹ್ನೆ / கேள்விக்குறி</b> (question mark),{' '}
+                  <b>नई पंक्ति / ಹೊಸ ಸಾಲು / புதிய வரி</b> (new line), <b>नया अनुच्छेद / ಹೊಸ ಪ್ಯಾರಾಗ್ರಾಫ್ / புதிய பத்தி</b> (new paragraph).
+                </>
+              )}
             </div>
           )}
         </div>
