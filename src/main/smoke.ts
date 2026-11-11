@@ -684,6 +684,10 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
           const pause = (ms) => new Promise(r => setTimeout(r, ms));
           document.querySelector('.tb-read')?.click();
           await pause(600);
+          // The computer's voices: the natural voice would download 156 MB.
+          const vs = document.querySelector('.read-panel .read-inline select');
+          if (vs) { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(vs, 'system'); vs.dispatchEvent(new Event('change', { bubbles: true })); }
+          await pause(300);
           document.querySelector('.read-play')?.click();
           let sentence = '';
           for (let i = 0; i < 30 && !sentence; i++) { await pause(200); const h = CSS.highlights.get('mn-read-sentence'); sentence = h ? String([...h][0]) : ''; }

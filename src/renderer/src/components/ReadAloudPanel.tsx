@@ -20,6 +20,7 @@ import {
   type ReadState,
   type StyleId
 } from '../lib/speech/readAloud'
+import { NaturalVoice, NATURAL_VOICES, NATURAL_MODEL_MB } from '../lib/speech/naturalVoice'
 
 interface Props {
   options: ReadOptions
@@ -50,19 +51,39 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [sleep, setSleep] = useState(0)
   const [note, setNote] = useState('')
+  const [preparing, setPreparing] = useState(false)
+  const [download, setDownload] = useState<{ l: number; t: number } | null>(null)
+  const [gpuOk, setGpuOk] = useState<boolean | null>(null)
   const player = useRef<ReadAloud | null>(null)
+  const natural = useRef<NaturalVoice | null>(null)
   const sleepTimer = useRef<number | null>(null)
 
   if (!player.current) {
-    player.current = new ReadAloud(options, {
-      onState: setState,
-      onSentence: (i, n) => setPos({ i, n })
+    natural.current = new NaturalVoice({
+      onProgress: (l, t) => setDownload(t > 0 && l < t ? { l, t } : null)
     })
+    player.current = new ReadAloud(
+      options,
+      {
+        onState: setState,
+        onSentence: (i, n) => setPos({ i, n }),
+        onNote: setNote,
+        onPreparing: setPreparing
+      },
+      natural.current
+    )
   }
 
   useEffect(() => {
-    player.current?.setOptions(options)
-  }, [options])
+    void NaturalVoice.supported().then(setGpuOk)
+    return () => natural.current?.dispose()
+  }, [])
+
+  useEffect(() => {
+    // Without a usable graphics chip, natural voices are too slow to read
+    // live; the computer's voices are used instead.
+    player.current?.setOptions(gpuOk === false ? { ...options, engine: 'system' } : options)
+  }, [options, gpuOk])
 
   useEffect(() => {
     const load = (): void => setVoices(speechSynthesis.getVoices())
@@ -153,10 +174,44 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
         </div>
         <div className="dict-status">
           <span className="dict-state">
-            {state === 'idle' ? 'Press ▶ to read from the top of the screen, or select text first.' : `${state === 'paused' ? 'Paused · ' : ''}Sentence ${pos.i + 1} of ${pos.n}`}
+            {download
+              ? `Downloading the natural voice once: ${download.l.toFixed(0)} / ${download.t.toFixed(0)} MB`
+              : preparing
+                ? 'Preparing the voice…'
+                : state === 'idle'
+                  ? 'Press ▶ to read from the top of the screen, or select text first.'
+                  : `${state === 'paused' ? 'Paused · ' : ''}Sentence ${pos.i + 1} of ${pos.n}`}
           </span>
           {note && <span className="dict-note">{note}</span>}
         </div>
+        <label className="read-inline" title={options.engine === 'natural' ? 'Natural voice (English)' : 'Voice'}>
+          <select
+            value={options.engine === 'natural' && gpuOk !== false ? options.naturalVoice : 'system'}
+            onChange={(e) =>
+              e.target.value === 'system' ? set({ engine: 'system' }) : set({ engine: 'natural', naturalVoice: e.target.value })
+            }
+          >
+            {gpuOk !== false && (
+              <>
+                <optgroup label="Natural voices (English)">
+                  {NATURAL_VOICES.filter((v) => v.gender === 'Female').map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} · {v.accent} female · {v.note}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label=" ">
+                  {NATURAL_VOICES.filter((v) => v.gender === 'Male').map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} · {v.accent} male · {v.note}
+                    </option>
+                  ))}
+                </optgroup>
+              </>
+            )}
+            <option value="system">This computer's voices (all languages)</option>
+          </select>
+        </label>
         <label className="read-inline" title="Reading style">
           <select value={options.style} onChange={(e) => set({ style: e.target.value as StyleId })}>
             {READ_STYLES.map((s) => (
@@ -197,8 +252,8 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
             <input type="checkbox" checked={options.sentiment} onChange={(e) => set({ sentiment: e.target.checked })} />
             <span>Follow the mood of each sentence</span>
           </label>
-          <label>
-            <span>Voice</span>
+          <label title="Used for other languages, and for everything when “This computer's voices” is chosen">
+            <span>Computer voice</span>
             <select value={options.voiceURI ?? ''} onChange={(e) => set({ voiceURI: e.target.value || null })}>
               <option value="">System default</option>
               <optgroup label="English">
@@ -246,8 +301,10 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
             </select>
           </label>
           <div className="dict-help">
-            Uses the voices installed on this computer: free and offline. More voices and languages: Windows Settings → Time &amp; language →
-            Speech → Add voices. Changes apply from the next sentence.
+            {gpuOk === false
+              ? 'Natural voices need a graphics chip that this computer does not offer; the computer’s own voices are used.'
+              : `Natural voices: Kokoro, free and offline after a one-time ${NATURAL_MODEL_MB} MB download; English for now (other languages are read by the computer’s voices).`}{' '}
+            More computer voices: Windows Settings → Time &amp; language → Speech → Add voices. Changes apply from the next sentence.
           </div>
         </div>
       )}

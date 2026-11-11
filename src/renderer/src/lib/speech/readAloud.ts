@@ -70,6 +70,9 @@ export const READ_STYLES: ReadStyle[] = [
 ]
 
 export interface ReadOptions {
+  /** Natural voices (Kokoro, English) or the voices installed on the computer. */
+  engine: 'natural' | 'system'
+  naturalVoice: string
   style: StyleId
   /** User multipliers on top of the style. */
   rate: number
@@ -88,6 +91,8 @@ export interface ReadOptions {
 }
 
 export const DEFAULT_READ: ReadOptions = {
+  engine: 'natural',
+  naturalVoice: 'af_heart',
   style: 'natural',
   rate: 1,
   pitch: 1,
@@ -346,6 +351,21 @@ export type ReadState = 'idle' | 'playing' | 'paused'
 export interface ReadEvents {
   onState: (state: ReadState) => void
   onSentence: (index: number, total: number) => void
+  /** A message for the bar, e.g. that natural voices fell back. */
+  onNote?: (note: string) => void
+  /** The natural voice is getting ready (true) or ready (false). */
+  onPreparing?: (preparing: boolean) => void
+}
+
+/** What read aloud needs from the natural-voice engine (see naturalVoice.ts). */
+export interface NaturalEngine {
+  make(key: string, text: string, voice: string, speed: number): Promise<{ samples: Float32Array; rate: number }>
+  play(a: { samples: Float32Array; rate: number }, opts: { volume: number; detuneCents: number }, onStart: (durationS: number) => void): Promise<void>
+  pause(): void
+  resume(): void
+  stopPlayback(): void
+  forget(): void
+  currentTime(): number
 }
 
 const SENTENCE_HL = 'mn-read-sentence'
@@ -367,14 +387,24 @@ export class ReadAloud {
   private timer: number | null = null
   private token = 0
   private scroller: HTMLElement | null = null
+  /** The sentence now playing is natural-voice audio (pause can hold it). */
+  private naturalPlaying = false
+  private wordLoop: number | null = null
+  private naturalFailed = false
 
   constructor(
     private opts: ReadOptions,
-    private readonly events: ReadEvents
+    private readonly events: ReadEvents,
+    private readonly natural: NaturalEngine | null = null
   ) {}
 
   setOptions(opts: ReadOptions): void {
+    const voiceChanged = opts.naturalVoice !== this.opts.naturalVoice || opts.engine !== this.opts.engine
     this.opts = opts
+    if (voiceChanged) {
+      this.natural?.forget()
+      this.naturalFailed = false
+    }
   }
 
   get current(): number {
@@ -403,6 +433,13 @@ export class ReadAloud {
 
   pause(): void {
     if (this.state !== 'playing') return
+    if (this.naturalPlaying && this.natural) {
+      // Natural audio really pauses, mid-word, and carries on from there.
+      this.natural.pause()
+      this.state = 'paused'
+      this.events.onState('paused')
+      return
+    }
     // Cancel and replay the sentence on resume: pause() on Chromium's speech
     // engine is unreliable and can stall for good.
     this.token++
@@ -413,12 +450,20 @@ export class ReadAloud {
   }
 
   resume(): void {
-    if (this.state === 'paused') this.play()
+    if (this.state !== 'paused') return
+    if (this.naturalPlaying && this.natural) {
+      this.natural.resume()
+      this.state = 'playing'
+      this.events.onState('playing')
+      return
+    }
+    this.play()
   }
 
   stop(): void {
     this.token++
     this.clearTimer()
+    this.stopNatural()
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
     this.state = 'idle'
     this.clearHighlights()
@@ -437,12 +482,118 @@ export class ReadAloud {
     if (!this.sentences.length) return
     this.index = Math.max(0, Math.min(i, this.sentences.length - 1))
     this.events.onSentence(this.index, this.sentences.length)
-    if (this.state === 'playing') {
+    if (this.state === 'playing' || this.state === 'paused') {
       this.token++
       this.clearTimer()
+      this.stopNatural()
       speechSynthesis.cancel()
+      this.state = 'playing'
+      this.events.onState('playing')
       this.speak()
     } else this.mark(this.sentences[this.index], null)
+  }
+
+  private stopNatural(): void {
+    if (this.wordLoop !== null) cancelAnimationFrame(this.wordLoop)
+    this.wordLoop = null
+    if (this.naturalPlaying) this.natural?.stopPlayback()
+    this.naturalPlaying = false
+  }
+
+  /** Speed and pitch for natural audio: pitch is a detune, which also speeds
+   * playback, so the voice is asked to speak slower by the same factor. */
+  private naturalParams(s: ReadSentence): { speed: number; cents: number; key: string; p: Prosody } {
+    const p = prosodyFor(s, this.opts)
+    const cents = Math.round(1200 * Math.log2(p.pitch))
+    const speed = Math.max(0.5, Math.min(2, p.rate / p.pitch))
+    return { speed, cents, p, key: `${s.spoken}|${this.opts.naturalVoice}|${speed.toFixed(2)}` }
+  }
+
+  private useNatural(s: ReadSentence): boolean {
+    return this.opts.engine === 'natural' && !!this.natural && !this.naturalFailed && !scriptLanguage(s.text)
+  }
+
+  private speakNatural(s: ReadSentence, token: number): void {
+    const n = this.natural!
+    const { speed, cents, p, key } = this.naturalParams(s)
+    this.mark(s, null)
+    this.scrollTo(s)
+    this.events.onSentence(this.index, this.sentences.length)
+    const audio = n.make(key, s.spoken, this.opts.naturalVoice, speed)
+    // Make the next two sentences while this one plays, so there is no gap.
+    for (let k = 1; k <= 2; k++) {
+      const nx = this.sentences[this.index + k]
+      if (nx && this.useNatural(nx)) {
+        const q = this.naturalParams(nx)
+        void n.make(q.key, nx.spoken, this.opts.naturalVoice, q.speed).catch(() => undefined)
+      }
+    }
+    let waiting = true
+    const slow = window.setTimeout(() => {
+      if (waiting && token === this.token) this.events.onPreparing?.(true)
+    }, 400)
+    audio
+      .then((a) => {
+        waiting = false
+        window.clearTimeout(slow)
+        this.events.onPreparing?.(false)
+        if (token !== this.token) return
+        this.naturalPlaying = true
+        const words = [...s.text.matchAll(/\S+/g)].map((m) => ({ start: m.index!, end: m.index! + m[0].length }))
+        const totalChars = words.reduce((t, w) => t + (w.end - w.start) + 1, 0) || 1
+        return n
+          .play(a, { volume: p.volume, detuneCents: cents }, (duration) => {
+            // Words lit in step with the audio, by their share of the
+            // sentence's letters; the clock stops while paused.
+            const t0 = n.currentTime()
+            let last = -1
+            const tick = (): void => {
+              if (token !== this.token) return
+              const f = Math.max(0, (n.currentTime() - t0) / Math.max(0.1, duration))
+              let acc = 0
+              let wi = words.length - 1
+              for (let i = 0; i < words.length; i++) {
+                acc += (words[i].end - words[i].start + 1) / totalChars
+                if (f <= acc) {
+                  wi = i
+                  break
+                }
+              }
+              if (wi !== last && words[wi]) {
+                last = wi
+                this.mark(s, rangeOf(s, words[wi].start, words[wi].end))
+              }
+              this.wordLoop = requestAnimationFrame(tick)
+            }
+            this.wordLoop = requestAnimationFrame(tick)
+          })
+          .then(() => {
+            if (this.wordLoop !== null) cancelAnimationFrame(this.wordLoop)
+            this.wordLoop = null
+            this.naturalPlaying = false
+            if (token !== this.token || this.state !== 'playing') return
+            this.timer = window.setTimeout(() => {
+              if (token !== this.token) return
+              if (this.index >= this.sentences.length - 1) {
+                this.stop()
+                return
+              }
+              this.index++
+              this.speak()
+            }, p.pauseAfter)
+          })
+      })
+      .catch((err) => {
+        window.clearTimeout(slow)
+        this.events.onPreparing?.(false)
+        if (token !== this.token) return
+        // No usable graphics chip, or the model could not load: carry on with
+        // the computer's own voices rather than stopping.
+        this.naturalFailed = true
+        this.naturalPlaying = false
+        this.events.onNote?.(`Natural voice unavailable (${err instanceof Error ? err.message : String(err)}). Using this computer's voices instead.`)
+        this.speak()
+      })
   }
 
   private clearTimer(): void {
@@ -496,6 +647,10 @@ export class ReadAloud {
       return
     }
     const token = ++this.token
+    if (this.useNatural(s)) {
+      this.speakNatural(s, token)
+      return
+    }
     const p = prosodyFor(s, this.opts)
     const u = new SpeechSynthesisUtterance(s.spoken)
     const voice = this.pickVoice(s)
