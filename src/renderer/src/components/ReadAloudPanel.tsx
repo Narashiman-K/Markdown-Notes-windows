@@ -48,6 +48,7 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
   const [state, setState] = useState<ReadState>('idle')
   const [pos, setPos] = useState<{ i: number; n: number }>({ i: 0, n: 0 })
   const [more, setMore] = useState(false)
+  const [info, setInfo] = useState(false)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [sleep, setSleep] = useState(0)
   const [note, setNote] = useState('')
@@ -132,6 +133,9 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
 
   const playPause = (): void => {
     const p = player.current!
+    // Sound may only start from a press, so wake the audio now, not when the
+    // first sentence is ready a few seconds later.
+    if (state !== 'playing') natural.current?.unlock()
     if (state === 'playing') p.pause()
     else if (state === 'paused') p.resume()
     else start()
@@ -228,6 +232,15 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
         <button className="dict-summary" onClick={() => setMore((v) => !v)} title="Pitch, emotion, voice and more">
           More {more ? '▾' : '▸'}
         </button>
+        <button
+          className={`read-info${info ? ' on' : ''}`}
+          onClick={() => setInfo((v) => !v)}
+          title="About the voices"
+          aria-label="About the voices"
+          aria-expanded={info}
+        >
+          i
+        </button>
         <button className="dict-close" onClick={props.onClose} title="Close (Esc)" aria-label="Close">
           ✕
         </button>
@@ -300,12 +313,14 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
               ))}
             </select>
           </label>
-          <div className="dict-help">
-            {gpuOk === false
-              ? 'Natural voices need a graphics chip that this computer does not offer; the computer’s own voices are used.'
-              : `Natural voices: Kokoro, free and offline after a one-time ${NATURAL_MODEL_MB} MB download; English for now (other languages are read by the computer’s voices).`}{' '}
-            More computer voices: Windows Settings → Time &amp; language → Speech → Add voices. Changes apply from the next sentence.
-          </div>
+        </div>
+      )}
+      {info && (
+        <div className="read-info-pop" role="note">
+          {gpuOk === false
+            ? 'Natural voices need a graphics chip that this computer does not offer; the computer’s own voices are used.'
+            : `Natural voices: Kokoro, free and offline after a one-time ${NATURAL_MODEL_MB} MB download; English for now (other languages are read by the computer’s voices).`}{' '}
+          More computer voices: Windows Settings → Time &amp; language → Speech → Add voices. Changes apply from the next sentence.
         </div>
       )}
     </div>

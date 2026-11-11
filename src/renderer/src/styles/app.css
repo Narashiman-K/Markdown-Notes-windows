@@ -1599,6 +1599,13 @@ button.tb.on,
 .read-inline > span { color: var(--muted); font-size: 12px; }
 .read-inline select, .read-panel .dict-options select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--chrome-border); border-radius: 6px; padding: 2px 6px; }
 .read-inline input[type='range'] { width: 90px; }
+.read-info {
+  flex: none; width: 20px; height: 20px; border-radius: 50%; padding: 0; cursor: pointer;
+  border: 1px solid var(--chrome-border); background: var(--bg); color: var(--muted);
+  font: italic 600 12px/1 Georgia, serif; display: grid; place-items: center;
+}
+.read-info:hover, .read-info.on { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 8px var(--backlit-glow); }
+.read-info-pop { margin-top: 6px; font-size: 12px; color: var(--muted); max-width: 70ch; }
 .tb.tb-read { font-weight: 600; }
 @media (max-width: 900px) { .read-inline:not(:first-of-type) { display: none; } }
 

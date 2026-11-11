@@ -5,7 +5,7 @@
  *
  * Only a handful of voices are offered (the best-rated American and British,
  * female and male), each a 0.5 MB style file fetched when first used. The
- * model is downloaded once (156 MB, 16-bit, run on the graphics chip) and
+ * model is downloaded once (114 MB, uint8f16, run on the graphics chip) and
  * kept in the cache; `bundled` reads it from the app's own files instead.
  *
  * Messages in:  { type: 'load', bundled, base, wasmPaths }
@@ -55,9 +55,10 @@ async function load(m: { bundled: boolean; base: string; wasmPaths: string; voic
     env.useBrowserCache = true
   }
   tts = await KokoroTTS.from_pretrained(KOKORO_MODEL, {
-    // 16-bit on the graphics chip (156 MB, faster than real time on this
-    // class of PC); 8-bit on the processor is the fallback, and much slower.
-    dtype: (m.dtype ?? (m.device === 'webgpu' ? 'fp16' : 'q8')) as 'q8',
+    // 8-bit weights with 16-bit maths on the graphics chip (114 MB, faster
+    // than real time). Plain fp16 gives silent (NaN) audio on WebGPU, so it is
+    // never used. 8-bit on the processor is the fallback, and much slower.
+    dtype: (m.dtype ?? (m.device === 'webgpu' ? 'uint8f16' : 'q8')) as 'q8',
     device: m.device ?? 'wasm',
     progress_callback: (p: { status: string; file?: string; loaded?: number; total?: number }) => {
       if (p.status === 'progress') post({ type: 'progress', file: p.file, loaded: p.loaded, total: p.total })
@@ -82,6 +83,11 @@ self.onmessage = async (e: MessageEvent<{ type: string; [k: string]: unknown }>)
     if (!tts) throw new Error('The voice is not loaded yet.')
     const audio = await tts.generate(String(m.text), { voice: String(m.voice) as never, speed: Number(m.speed) || 1 })
     const samples = audio.audio as Float32Array
+    // A broken graphics driver can return NaN samples, which play as silence:
+    // report it so the reader falls back to the computer's voices.
+    let bad = 0
+    for (let i = 0; i < samples.length; i += 97) if (Number.isNaN(samples[i])) bad++
+    if (bad > samples.length / 97 / 4) throw new Error('The natural voice produced no sound on this graphics chip.')
     post({ type: 'audio', id: m.id, samples, rate: audio.sampling_rate }, [samples.buffer])
   } catch (err) {
     post({ type: 'error', id: m.id, message: err instanceof Error ? err.message : String(err) })

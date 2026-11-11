@@ -27,7 +27,7 @@ export const NATURAL_VOICES: NaturalVoiceInfo[] = [
   { id: 'bm_fable', name: 'Fable', gender: 'Male', accent: 'British', note: 'warm storyteller' }
 ]
 
-export const NATURAL_MODEL_MB = 156
+export const NATURAL_MODEL_MB = 114
 
 export interface NaturalEvents {
   onProgress: (loadedMb: number, totalMb: number) => void
@@ -119,6 +119,24 @@ export class NaturalVoice {
   /** Forget audio made ahead (the voice or speed changed). */
   forget(): void {
     this.made.clear()
+  }
+
+  /**
+   * Call straight from the ▶ click: browsers only let sound start from a
+   * user's press, and the first sentence is ready only seconds later.
+   */
+  unlock(): void {
+    try {
+      this.ctx ??= new AudioContext()
+      if (this.ctx.state === 'suspended') void this.ctx.resume()
+      // A one-sample silent buffer marks the context as started by the user.
+      const s = this.ctx.createBufferSource()
+      s.buffer = this.ctx.createBuffer(1, 1, 22050)
+      s.connect(this.ctx.destination)
+      s.start()
+    } catch {
+      /* no audio device: playback will report it */
+    }
   }
 
   /** Plays audio; resolves when it ends (or is stopped). */
