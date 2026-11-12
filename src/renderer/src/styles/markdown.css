@@ -187,6 +187,18 @@
   margin: 2.2em 0;
   border-top: 1px dashed var(--chrome-border, #d0d0d0);
 }
+/* The original page's number at its foot, like a footer in Word: small, grey,
+   to the right, and not part of the text (it cannot be selected). */
+.markdown-body .mn-page-num {
+  margin: 1.2em 0 0;
+  text-align: right;
+  font-size: 0.72em;
+  color: var(--muted, #8a8a8a);
+  opacity: 0.85;
+  user-select: none;
+  letter-spacing: 0.02em;
+}
+.mn-page-anchor { display: block; height: 0; }
 /* A scanned page's own picture, outside page view: framed, and kept to a size
    that leaves the text beneath it in sight. */
 .markdown-body img.mn-scan {
@@ -214,6 +226,9 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
 }
 .mn-page-view .mn-sheet > *:first-child { margin-top: 0; }
+/* In page view the number sits in the sheet's bottom-right corner. */
+.mn-page-view .mn-sheet { position: relative; }
+.mn-page-view .mn-sheet .mn-page-num { position: absolute; right: 3.4em; bottom: 1.4em; margin: 0; }
 .mn-page-view .mn-page-break { display: none; }
 
 /* A scanned page: the original on the left, its text on the right, each a
@@ -263,6 +278,9 @@
   .markdown-body h3 {
     break-after: avoid;
   }
+  /* Printed pages are numbered by the printer ("Page 3 of 120", see
+     standaloneHtml), so the original's numbers are not printed as well. */
+  .markdown-body .mn-page-num { display: none; }
   /* The original's page breaks, kept. */
   .mn-page-break {
     break-before: page;

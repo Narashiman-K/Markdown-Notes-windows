@@ -264,6 +264,10 @@ export function documentStats(source: string): { words: number; chars: number; l
  * `pageSize`, when the document recorded its original one, makes printing use
  * that paper size; the original's page breaks print as breaks either way.
  */
+/** Every printed page's number, "Page 3 of 120", small and grey at the bottom right. */
+const PAGE_FOOTER =
+  "@bottom-right { content: 'Page ' counter(page) ' of ' counter(pages); font: 8.5pt system-ui, 'Segoe UI', sans-serif; color: #8a8a8a; }"
+
 export function standaloneHtml(title: string, bodyHtml: string, css: string, forPrint: boolean, pageSize?: PageSize | null): string {
   const size = pageSize ? ` size: ${pageSize.width}pt ${pageSize.height}pt;` : ''
   return `<!doctype html>
@@ -271,7 +275,7 @@ export function standaloneHtml(title: string, bodyHtml: string, css: string, for
 <meta charset="utf-8">
 <title>${title.replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</title>
 <style>${css}</style>
-${forPrint ? `<style>@page {${size} margin: 18mm 16mm; } body { background: #fff; }</style>` : ''}
+${forPrint ? `<style>@page {${size} margin: 18mm 16mm; ${PAGE_FOOTER} } body { background: #fff; }</style>` : ''}
 </head>
 <body class="mn-standalone"><article class="markdown-body">${bodyHtml}</article></body></html>`
 }

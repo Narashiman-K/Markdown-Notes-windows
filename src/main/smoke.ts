@@ -390,11 +390,12 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
         // picture kept beside its text (lib/pages.ts).
         expect: [
           /Quarterly Operations Report/i,
-          /## Page 1/,
-          /## Page 2/,
+          // Page numbers at each page's foot, not big headings (1.3).
+          /^— 1 —$/m,
+          /^— 2 —$/m,
           /fourteen percent/i,
           /<!-- suprasuta:page-size width="\d/,
-          /<!-- suprasuta:page-break -->/,
+          /<!-- suprasuta:page-break page="2" -->/,
           /!\[Original page 2\]\(data:image\/jpeg;base64,[A-Za-z0-9+/]{1000}/
         ],
         ms: 240_000,
@@ -407,8 +408,8 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
       {
         file: 'sample-scanned-turned.pdf',
         expect: [
-          /## Page 1\s+Quarterly Operations Report/i,
-          /## Page 2\s+Quarterly Operations Report/i,
+          /^Quarterly Operations Report/im,
+          /page-break page="2" -->\s+Quarterly Operations Report/i,
           /fourteen percent[\s\S]*fourteen percent/i,
           /Page 1 was upside down; Page 2 was on its side in the scan/
         ],

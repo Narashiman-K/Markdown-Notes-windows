@@ -28,14 +28,14 @@
  */
 import type MarkdownIt from 'markdown-it'
 import type Token from 'markdown-it/lib/token.mjs'
-import { PAGE_BREAK, pageSizeLine as writeSize } from './convert/pageNotes'
+import { PAGE_BREAK, PAGE_NUMBER_LINE, pageSizeLine as writeSize } from './convert/pageNotes'
 
 export { PAGE_BREAK }
 /** The title of a scanned page's own picture; never shown. */
 export const SCAN_TITLE = 'suprasuta:scan'
 
 const SIZE_LINE = /<!-- suprasuta:page-size width="(\d+(?:\.\d+)?)" height="(\d+(?:\.\d+)?)" -->/
-const BREAK_LINE = /^<!-- suprasuta:page-break -->\s*$/
+const BREAK_LINE = /^<!-- suprasuta:page-break(?: page="(\d{1,5})")? -->\s*$/
 const SIZE_ONLY = /^<!-- suprasuta:page-size [^>]*-->\s*$/
 
 export interface PageSize {
@@ -133,16 +133,42 @@ function isScanParagraph(tokens: Token[], i: number): boolean {
 
 export function pagesPlugin(md: MarkdownIt): void {
   md.core.ruler.push('suprasuta_pages', (state) => {
-    // The notes themselves: the size draws nothing, a break draws a divider.
+    // The notes themselves: the size draws nothing, a break draws a divider
+    // (named after the page it starts, so contents links can open it).
+    let numbered = false
     for (const t of state.tokens) {
       if (t.type !== 'html_block') continue
       const text = t.content.trim()
       if (SIZE_ONLY.test(text)) t.content = ''
-      else if (BREAK_LINE.test(text)) {
-        t.content = '<div class="mn-page-break" aria-hidden="true"></div>\n'
-        t.meta = { ...(t.meta ?? {}), pageBreak: true }
+      else {
+        const m = BREAK_LINE.exec(text)
+        if (!m) continue
+        if (m[1]) numbered = true
+        t.content = `<div class="mn-page-break"${m[1] ? ` id="page-${m[1]}"` : ''} aria-hidden="true"></div>\n`
+        t.meta = { ...(t.meta ?? {}), pageBreak: true, page: m[1] ? Number(m[1]) : undefined }
       }
     }
+
+    // Page numbers ("— 3 —" on a line of its own at a page's foot) become a
+    // small grey footer, "Page 3 of 120", that reading aloud and selection skip.
+    const footers: number[] = []
+    for (let i = 0; i + 2 < state.tokens.length; i++) {
+      const [open, inline, close] = [state.tokens[i], state.tokens[i + 1], state.tokens[i + 2]]
+      if (open.type !== 'paragraph_open' || inline.type !== 'inline' || close.type !== 'paragraph_close' || open.level !== 0) continue
+      const m = PAGE_NUMBER_LINE.exec(inline.content.trim())
+      if (m) footers.push(i)
+    }
+    if (footers.length) {
+      const total = Math.max(...footers.map((i) => Number(PAGE_NUMBER_LINE.exec(state.tokens[i + 1].content.trim())![1])))
+      for (const i of footers.reverse()) {
+        const n = Number(PAGE_NUMBER_LINE.exec(state.tokens[i + 1].content.trim())![1])
+        const t = htmlBlock(state, `<p class="mn-page-num" data-mn-ignore aria-hidden="true">Page ${n} of ${total}</p>\n`)
+        t.map = state.tokens[i].map
+        state.tokens.splice(i, 3, t)
+      }
+    }
+    // Page 1 has no break before it: its anchor goes at the very top.
+    if (numbered || footers.length) state.tokens.unshift(htmlBlock(state, '<span id="page-1" class="mn-page-anchor"></span>\n'))
 
     // A scanned page's picture loses its marker title, which would otherwise
     // pop up as a tooltip, and gains a class the styles can find.
@@ -177,23 +203,28 @@ export function pagesPlugin(md: MarkdownIt): void {
 
     // Page view: each original page becomes a sheet.
     const sheets: Token[][] = [[]]
+    const sheetPage: Array<number | undefined> = [undefined]
     for (const t of tokens) {
-      if (t.meta?.pageBreak) sheets.push([])
-      else sheets[sheets.length - 1].push(t)
+      if (t.meta?.pageBreak) {
+        sheets.push([])
+        sheetPage.push(t.meta.page as number | undefined)
+      } else sheets[sheets.length - 1].push(t)
     }
     const out: Token[] = []
     sheets.forEach((sheet, n) => {
       if (!sheet.length && n > 0) return
+      // The break (and its page anchor) is dropped here, so the sheet carries it.
+      const id = sheetPage[n] ? ` id="page-${sheetPage[n]}"` : ''
       const at = sheet.findIndex((_, i) => isScanParagraph(sheet, i))
       if (at < 0) {
-        out.push(htmlBlock(state, `<section class="mn-sheet">\n`), ...sheet, htmlBlock(state, '</section>\n'))
+        out.push(htmlBlock(state, `<section class="mn-sheet"${id}>\n`), ...sheet, htmlBlock(state, '</section>\n'))
         return
       }
       // The picture on the left, everything else on the page on the right.
       const scan = sheet.slice(at, at + 3)
       const rest = [...sheet.slice(0, at), ...sheet.slice(at + 3)]
       out.push(
-        htmlBlock(state, `<section class="mn-sheet-pair">\n<div class="mn-sheet mn-sheet-original">\n`),
+        htmlBlock(state, `<section class="mn-sheet-pair"${id}>\n<div class="mn-sheet mn-sheet-original">\n`),
         ...scan,
         htmlBlock(state, `</div>\n<div class="mn-sheet mn-sheet-text">\n`),
         ...rest,

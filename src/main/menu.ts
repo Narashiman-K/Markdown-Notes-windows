@@ -144,6 +144,7 @@ export function buildMenu(win: BrowserWindow, send: Send): void {
         { label: 'Link…', accelerator: 'CmdOrCtrl+K', click: () => send('insert:link') },
         { label: 'Image…', click: () => send('insert:image') },
         { label: 'Table', click: () => send('insert:table') },
+        { label: 'Table of Contents', click: () => send('insert:toc') },
         { label: 'Horizontal Rule', click: () => send('insert:hr') }
       ]
     },

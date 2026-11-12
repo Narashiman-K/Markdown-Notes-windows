@@ -67,6 +67,7 @@ export type MenuAction =
   | 'insert:link'
   | 'insert:image'
   | 'insert:table'
+  | 'insert:toc'
   | 'insert:hr'
   | 'insert:h1'
   | 'insert:h2'

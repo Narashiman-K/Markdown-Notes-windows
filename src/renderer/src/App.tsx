@@ -34,6 +34,7 @@ import {
 } from './lib/history'
 import { extractHeadings, documentStats, renderMarkdown, standaloneHtml } from './lib/markdown'
 import { readPageSize, hasScans, removeScans } from './lib/pages'
+import { tocBlock, refreshToc, hasToc, hasOldPageHeadings, upgradeOldPages } from './lib/toc'
 import {
   applyAnnotation,
   listAnnotations,
@@ -510,6 +511,15 @@ export default function App(): React.JSX.Element {
     })
   }, [flash, history, mode])
 
+  // A contents block (Insert > Table of contents) follows the headings:
+  // rebuilt on leaving Edit, so the view always shows the current list.
+  useEffect(() => {
+    if (mode !== 'view' || !hasToc(content)) return
+    const fresh = refreshToc(content)
+    if (fresh !== content) setContent(fresh)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
+
   const loadDocument = useCallback((path: string | null, text: string) => {
     // The document being replaced was saved or knowingly discarded: its
     // recovery copy goes, and the new document gets its own.
@@ -526,6 +536,23 @@ export default function App(): React.JSX.Element {
     setDirty(mended.repaired > 0)
     if (mended.repaired) {
       flash(`Repaired ${mended.repaired} picture(s) damaged by an earlier highlight. Save to keep the repair.`)
+    }
+    // A file converted before 1.3 has a big "## Page 3" heading on every page.
+    if (hasOldPageHeadings(mended.source)) {
+      void (async () => {
+        const yes = await window.api.confirm({
+          title: 'Tidy up page numbers?',
+          message: 'Show the page numbers small, like a footer, and make the contents links work?',
+          detail:
+            'This file was converted by an earlier version, which put a large "Page 3" heading at the top of every page. ' +
+            'They become small grey page numbers at the foot of each page, and the table of contents opens each chapter. ' +
+            'Nothing else changes, and you can undo it by not saving.'
+        })
+        if (!yes) return
+        setContent((c) => (c === mended.source ? upgradeOldPages(c) : c))
+        setDirty(true)
+        flash('Page numbers tidied and contents links added. Save to keep the change.')
+      })()
     }
     setMode('view')
     setActiveId(null)
@@ -610,7 +637,10 @@ export default function App(): React.JSX.Element {
 
   const doSave = useCallback(
     async (saveAs = false, folder?: string, purpose?: 'autosave'): Promise<boolean> => {
-      const r = await window.api.saveFile({ filePath, content, saveAs, folder, purpose })
+      // The contents block is brought up to date with the headings first.
+      const text = refreshToc(content)
+      if (text !== content) setContent(text)
+      const r = await window.api.saveFile({ filePath, content: text, saveAs, folder, purpose })
       if (r.ok && r.filePath) {
         setFilePath(r.filePath)
         setDirty(false)
@@ -1227,6 +1257,9 @@ export default function App(): React.JSX.Element {
           return editorEdit((t, f, to) => insertBlock(t, f, to, '---'))
         case 'insert:table':
           return editorEdit((t, f, to) => insertBlock(t, f, to, TABLE_SNIPPET))
+        case 'insert:toc':
+          // Links to every heading; rebuilt by itself when headings change.
+          return editorEdit((t, f, to) => insertBlock(t, f, to, tocBlock(t)))
         case 'insert:link': {
           if (mode !== 'edit') {
             flash('Switch to Edit mode (Ctrl+E) to insert a link.')
