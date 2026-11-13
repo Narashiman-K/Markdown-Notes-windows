@@ -21,6 +21,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { renderMarkdown } from '../lib/markdown'
 import { buildSourceMap, rangeToOffsets, toSourceRange, trimRange } from '../lib/align'
+import type { Table } from '../lib/table'
+import TableTools from './TableTools'
 
 export type PreviewFormat = 'bold' | 'italic' | 'heading' | 'link' | 'code'
 
@@ -40,6 +42,9 @@ interface Props {
    * syncing silently dead. Telling the parent means it can re-link.
    */
   onElements: (elements: { scroller: HTMLDivElement; body: HTMLElement } | null) => void
+  /** Table editing, the same as in View mode (TableTools). */
+  onTableEdit?: (line: number) => void
+  onTableChange?: (line: number, change: (t: Table) => Table, label: string) => void
 }
 
 const BUTTONS: Array<{ action: PreviewFormat; label: string; title: string }> = [
@@ -54,7 +59,9 @@ export default function LivePreview({
   source,
   zoom,
   onFormat,
-  onElements
+  onElements,
+  onTableEdit,
+  onTableChange
 }: Props): React.JSX.Element {
   const scrollerRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLElement>(null)
@@ -185,6 +192,16 @@ export default function LivePreview({
         className="markdown-body"
         style={{ fontSize: `${zoom * 15}px` }}
         dangerouslySetInnerHTML={{ __html: html }}
+      />
+
+      <TableTools
+        hostRef={bodyRef}
+        scrollerRef={scrollerRef}
+        source={source}
+        html={html}
+        enabled={!!onTableChange}
+        onTableEdit={onTableEdit}
+        onTableChange={onTableChange}
       />
 
       {bar && (

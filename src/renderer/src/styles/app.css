@@ -1716,3 +1716,13 @@ html[data-theme='dark'] { --backlit-halo: rgba(255, 150, 60, 0.26); }
   font: 14px/1.45 system-ui, 'Segoe UI', sans-serif; color: var(--fg); background: var(--bg);
   border: 2px solid var(--accent); border-radius: 4px; box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 14px var(--backlit-glow);
 }
+
+/* Edit mode: the cursor is in a table, so the table editor is one click away. */
+.edit-split { position: relative; }
+.editor-table-chip {
+  position: absolute; top: 8px; left: calc(50% - 10px); transform: translateX(-100%); z-index: 20;
+  padding: 4px 10px; border-radius: 8px; cursor: pointer; font: 12px system-ui, 'Segoe UI', sans-serif;
+  color: var(--fg); background: var(--chrome); border: 1px solid var(--backlit-edge);
+  box-shadow: var(--shadow), 0 0 0 1px var(--backlit-edge), 0 0 20px var(--backlit-halo, rgba(255, 140, 40, 0.3));
+}
+.editor-table-chip:hover { box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 12px var(--backlit-glow); }

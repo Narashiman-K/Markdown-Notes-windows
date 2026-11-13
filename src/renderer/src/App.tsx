@@ -818,6 +818,35 @@ export default function App(): React.JSX.Element {
 
   /* ----------------------------------------------------- source editing */
 
+  /** Rewrites one table in Edit mode, through the editor so undo works there. */
+  const editTableInEditor = useCallback((line: number, change: (t: Table) => Table) => {
+    const ed = editorRef.current
+    if (!ed) return
+    const text = ed.getValue()
+    const range = tableAtLine(text, line)
+    const table = range ? parseTable(linesOf(text, range)) : null
+    if (!range || !table) return
+    const { from } = ed.getSelection()
+    const next = replaceLines(text, range, serializeTable(change(table)))
+    const at = Math.min(from, next.length)
+    ed.applyEdit({ text: next, selectionStart: at, selectionEnd: at })
+  }, [])
+
+  // Is the editor's cursor inside a table? Then a chip offers the table editor.
+  const cursorInTable = useMemo(() => {
+    if (mode !== 'edit') return false
+    let at = 0
+    for (let i = 1; i < cursor.line; i++) {
+      const nl = content.indexOf('\n', at)
+      if (nl < 0) return false
+      at = nl + 1
+    }
+    const end = content.indexOf('\n', at)
+    const lineText = content.slice(at, end < 0 ? undefined : end)
+    if (!lineText.includes('|')) return false
+    return !!tableAtLine(content, cursor.line - 1)
+  }, [mode, cursor.line, content])
+
   const editorEdit = useCallback(
     (fn: (text: string, from: number, to: number) => ReturnType<typeof wrapSelection>) => {
       if (mode !== 'edit' || !editorRef.current) {
@@ -1734,7 +1763,24 @@ export default function App(): React.JSX.Element {
                 zoom={zoom}
                 onFormat={formatFromPreview}
                 onElements={setPreviewEls}
+                onTableEdit={(line) => {
+                  const text = editorRef.current?.getValue() ?? content
+                  const range = tableAtLine(text, line)
+                  const table = range ? parseTable(linesOf(text, range)) : null
+                  if (range && table) setTableDialog({ kind: 'edit', table, range, via: 'edit' })
+                }}
+                onTableChange={(line, change) => editTableInEditor(line, change)}
               />
+              {cursorInTable && (
+                <button
+                  className="editor-table-chip"
+                  title="Open the table editor for the table at the cursor"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => void actionRef.current('insert:table')}
+                >
+                  ✎ Edit table
+                </button>
+              )}
             </div>
           )}
         </section>
