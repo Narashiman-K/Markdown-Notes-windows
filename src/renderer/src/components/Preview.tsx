@@ -3,6 +3,7 @@ import { renderMarkdown } from '../lib/markdown'
 import { readPageSize, sheetStyle } from '../lib/pages'
 import { buildSourceMap, indexTextNodes, domToOffset, toSourceRange, type TextNodeIndexEntry } from '../lib/align'
 import { HIGHLIGHT_COLORS } from '../lib/annotations'
+import { addColumn, addRow, linesOf, parseTable, setCell, tableAtLine, type Table } from '../lib/table'
 import type { AnnotationType } from '../../../shared/types'
 
 export interface PreviewHandle {
@@ -37,6 +38,26 @@ interface Props {
   pageView?: boolean
   /** Leave out scanned pages' own pictures, showing only their text. */
   hideScans?: boolean
+  /** Open the table editor on the table starting at this source line. */
+  onTableEdit?: (line: number) => void
+  /** Change the table starting at this source line (undoable). */
+  onTableChange?: (line: number, change: (t: Table) => Table, label: string) => void
+}
+
+interface CellEdit {
+  line: number
+  r: number
+  c: number
+  value: string
+  rect: { left: number; top: number; width: number; height: number }
+}
+
+/** Row and column of a rendered table cell (row 0 is the header). */
+function cellPosition(cell: HTMLTableCellElement): { r: number; c: number } {
+  const tr = cell.parentElement as HTMLTableRowElement
+  const inHead = tr.parentElement?.tagName === 'THEAD'
+  const bodyRows = Array.from(tr.parentElement?.children ?? [])
+  return { r: inHead ? 0 : bodyRows.indexOf(tr) + 1, c: cell.cellIndex }
 }
 
 interface ToolbarState {
@@ -212,6 +233,126 @@ const Preview = forwardRef<PreviewHandle, Props>(function Preview(props, ref) {
     }
   }, [props])
 
+  /* --------------------------------------------------------------- tables
+   * Hovering a table shows small buttons on its corner (edit, + row,
+   * + column); double-clicking a cell edits it right there.
+   */
+  const [tableHover, setTableHover] = useState<{ line: number; x: number; y: number } | null>(null)
+  const [cellEdit, setCellEdit] = useState<CellEdit | null>(null)
+  const hideTimer = useRef<number | null>(null)
+  const nextCell = useRef<{ line: number; r: number; c: number } | null>(null)
+  const tablesEditable = !!props.onTableChange && !props.readerMode
+
+  const keepHover = (): void => {
+    if (hideTimer.current) window.clearTimeout(hideTimer.current)
+    hideTimer.current = null
+  }
+  const dropHover = (): void => {
+    keepHover()
+    hideTimer.current = window.setTimeout(() => setTableHover(null), 450)
+  }
+
+  const cellSource = useCallback(
+    (line: number, r: number, c: number): string | null => {
+      const range = tableAtLine(source, line)
+      const t = range ? parseTable(linesOf(source, range)) : null
+      return t?.rows[r]?.[c] ?? null
+    },
+    [source]
+  )
+
+  const openCell = useCallback(
+    (cell: HTMLTableCellElement): void => {
+      const table = cell.closest('table[data-mn-table]') as HTMLElement | null
+      if (!table) return
+      const line = Number(table.dataset.mnTable)
+      const { r, c } = cellPosition(cell)
+      const value = cellSource(line, r, c)
+      if (value === null) return
+      const b = cell.getBoundingClientRect()
+      window.getSelection()?.removeAllRanges()
+      setTableHover(null)
+      setCellEdit({ line, r, c, value: value.replace(/<br\s*\/?>/gi, '\n'), rect: { left: b.left, top: b.top, width: Math.max(b.width, 160), height: Math.max(b.height, 34) } })
+    },
+    [cellSource]
+  )
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host || !tablesEditable) return
+    const onMove = (e: MouseEvent): void => {
+      const table = (e.target as HTMLElement).closest('table[data-mn-table]') as HTMLElement | null
+      if (!table) return dropHover()
+      keepHover()
+      const b = table.getBoundingClientRect()
+      const line = Number(table.dataset.mnTable)
+      setTableHover((h) => (h && h.line === line && Math.abs(h.y - b.top) < 1 ? h : { line, x: b.right, y: b.top }))
+    }
+    const onDbl = (e: MouseEvent): void => {
+      const cell = (e.target as HTMLElement).closest('td, th') as HTMLTableCellElement | null
+      if (!cell || !cell.closest('table[data-mn-table]')) return
+      e.preventDefault()
+      openCell(cell)
+    }
+    const scroller = host.parentElement
+    const onScroll = (): void => {
+      setTableHover(null)
+      setCellEdit(null)
+    }
+    host.addEventListener('mousemove', onMove)
+    host.addEventListener('mouseleave', dropHover)
+    host.addEventListener('dblclick', onDbl)
+    scroller?.addEventListener('scroll', onScroll)
+    return () => {
+      host.removeEventListener('mousemove', onMove)
+      host.removeEventListener('mouseleave', dropHover)
+      host.removeEventListener('dblclick', onDbl)
+      scroller?.removeEventListener('scroll', onScroll)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tablesEditable, openCell])
+
+  // After Tab, the next cell opens once the table has re-rendered.
+  useEffect(() => {
+    const want = nextCell.current
+    if (!want) return
+    nextCell.current = null
+    const table = hostRef.current?.querySelector(`table[data-mn-table="${want.line}"]`) as HTMLTableElement | null
+    const rows = table ? Array.from(table.rows) : []
+    const cell = rows[want.r]?.cells[want.c] ?? rows[want.r + 1]?.cells[0]
+    if (cell) openCell(cell)
+  }, [html, openCell])
+
+  const commitCell = (move: 'none' | 'next' | 'prev' | 'down'): void => {
+    const ed = cellEdit
+    if (!ed) return
+    setCellEdit(null)
+    const before = cellSource(ed.line, ed.r, ed.c)
+    const value = ed.value.replace(/\n/g, '<br>')
+    if (move !== 'none') {
+      const t = (() => {
+        const range = tableAtLine(source, ed.line)
+        return range ? parseTable(linesOf(source, range)) : null
+      })()
+      const cols = t?.align.length ?? 1
+      const rows = t?.rows.length ?? 1
+      let { r, c } = ed
+      if (move === 'next') (c = c + 1 >= cols ? 0 : c + 1), (r = c === 0 ? r + 1 : r)
+      if (move === 'prev') (c = c - 1 < 0 ? cols - 1 : c - 1), (r = c === cols - 1 ? r - 1 : r)
+      if (move === 'down') r = r + 1
+      if (r >= 0 && r < rows) nextCell.current = { line: ed.line, r, c }
+    }
+    if (before !== value) props.onTableChange?.(ed.line, (t) => setCell(t, ed.r, ed.c, value), 'Edit table cell')
+    else if (nextCell.current) {
+      // Nothing changed, so no re-render will come: open the next cell now.
+      const want = nextCell.current
+      nextCell.current = null
+      const table = hostRef.current?.querySelector(`table[data-mn-table="${want.line}"]`) as HTMLTableElement | null
+      const cell = table ? Array.from(table.rows)[want.r]?.cells[want.c] : null
+      if (cell) openCell(cell)
+    }
+  }
+
   // Highlight the active annotation
   useEffect(() => {
     const host = hostRef.current
@@ -287,6 +428,55 @@ const Preview = forwardRef<PreviewHandle, Props>(function Preview(props, ref) {
             ⌫
           </button>
         </div>
+      )}
+
+      {tableHover && !cellEdit && (
+        <div
+          className="table-hover-tools"
+          data-mn-ignore
+          style={{ left: tableHover.x, top: tableHover.y }}
+          onMouseEnter={keepHover}
+          onMouseLeave={dropHover}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <button title="Open the table editor" onClick={() => props.onTableEdit?.(tableHover.line)}>
+            ✎ Edit table
+          </button>
+          <button title="Add a row at the end" onClick={() => props.onTableChange?.(tableHover.line, (t) => addRow(t, t.rows.length), 'Add table row')}>
+            ＋ Row
+          </button>
+          <button title="Add a column at the end" onClick={() => props.onTableChange?.(tableHover.line, (t) => addColumn(t, t.align.length), 'Add table column')}>
+            ＋ Column
+          </button>
+          <span className="table-hover-hint">or double-click a cell</span>
+        </div>
+      )}
+
+      {cellEdit && (
+        <textarea
+          className="cell-edit"
+          data-mn-ignore
+          autoFocus
+          style={{ left: cellEdit.rect.left, top: cellEdit.rect.top, width: cellEdit.rect.width, minHeight: cellEdit.rect.height }}
+          value={cellEdit.value}
+          onChange={(e) => setCellEdit({ ...cellEdit, value: e.target.value })}
+          onFocus={(e) => e.currentTarget.select()}
+          onBlur={() => commitCell('none')}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              setCellEdit(null)
+            } else if (e.key === 'Tab') {
+              e.preventDefault()
+              commitCell(e.shiftKey ? 'prev' : 'next')
+            } else if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              commitCell('down')
+            }
+          }}
+          aria-label="Edit cell (Enter to save, Shift+Enter for a new line, Tab for the next cell, Esc to cancel)"
+          title="Enter saves · Shift+Enter new line · Tab next cell · Esc cancels"
+        />
       )}
 
       {hoverNote && (

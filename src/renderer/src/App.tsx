@@ -5,6 +5,8 @@ import Editor, { type EditorHandle } from './components/Editor'
 import Sidebar from './components/Sidebar'
 import FindBar from './components/FindBar'
 import NoteDialog from './components/NoteDialog'
+import TableEditor, { TableSizePicker } from './components/TableEditor'
+import { linesOf, newTable, parseTable, replaceLines, serializeTable, tableAtLine, type Table, type TableRange } from './lib/table'
 import AboutDialog from './components/AboutDialog'
 import ConvertDialog from './components/ConvertDialog'
 import MergeDialog from './components/MergeDialog'
@@ -192,6 +194,12 @@ export default function App(): React.JSX.Element {
   const [compareOpen, setCompareOpen] = useState(false)
   const [dictationOpen, setDictationOpen] = useState(false)
   const [readOpen, setReadOpen] = useState(false)
+  // The table editor: picking a size for a new table, or editing one.
+  const [tableDialog, setTableDialog] = useState<
+    | { kind: 'size'; from: number; to: number }
+    | { kind: 'edit'; table: Table; range: TableRange | null; via: 'edit' | 'view'; from?: number; to?: number }
+    | null
+  >(null)
   const [readToggle, setReadToggle] = useState(0)
   // The action handler is memoised and does not list these, so it reads
   // them through a ref: otherwise it sees a stale "open" and the toolbar
@@ -1255,8 +1263,20 @@ export default function App(): React.JSX.Element {
           return editorEdit((t, f, to) => prefixLines(t, f, to, '> '))
         case 'insert:hr':
           return editorEdit((t, f, to) => insertBlock(t, f, to, '---'))
-        case 'insert:table':
-          return editorEdit((t, f, to) => insertBlock(t, f, to, TABLE_SNIPPET))
+        case 'insert:table': {
+          // In a table: edit it. Elsewhere: pick a size, then fill it in.
+          if (mode !== 'edit' || !editorRef.current) {
+            flash('Switch to Edit mode (Ctrl+E) to place a new table. To change a table, point at it and choose ✎ Edit table.')
+            return
+          }
+          const text = editorRef.current.getValue()
+          const { from, to } = editorRef.current.getSelection()
+          const range = tableAtLine(text, text.slice(0, from).split('\n').length - 1)
+          const table = range ? parseTable(linesOf(text, range)) : null
+          if (range && table) setTableDialog({ kind: 'edit', table, range, via: 'edit' })
+          else setTableDialog({ kind: 'size', from, to })
+          return
+        }
         case 'insert:toc':
           // Links to every heading; rebuilt by itself when headings change.
           return editorEdit((t, f, to) => insertBlock(t, f, to, tocBlock(t)))
@@ -1677,6 +1697,16 @@ export default function App(): React.JSX.Element {
               readerMode={readerOn}
               pageView={pageView}
               hideScans={!showScans}
+              onTableEdit={(line) => {
+                const range = tableAtLine(content, line)
+                const table = range ? parseTable(linesOf(content, range)) : null
+                if (range && table) setTableDialog({ kind: 'edit', table, range, via: 'view' })
+              }}
+              onTableChange={(line, change, label) => {
+                const range = tableAtLine(content, line)
+                const table = range ? parseTable(linesOf(content, range)) : null
+                if (range && table) commitContent(replaceLines(content, range, serializeTable(change(table))), label)
+              }}
               onAnnotate={(type, color) => annotate(type, color)}
               onComment={() => void actionRef.current('annot:comment')}
               onRemoveAnnotation={doRemove}
@@ -1920,6 +1950,39 @@ export default function App(): React.JSX.Element {
         />
       )}
 
+      {tableDialog?.kind === 'size' && (
+        <TableSizePicker
+          onCancel={() => setTableDialog(null)}
+          onPick={(rows, cols) =>
+            setTableDialog({ kind: 'edit', table: newTable(rows, cols), range: null, via: 'edit', from: tableDialog.from, to: tableDialog.to })
+          }
+        />
+      )}
+      {tableDialog?.kind === 'edit' && (
+        <TableEditor
+          initial={tableDialog.table}
+          isNew={!tableDialog.range}
+          onCancel={() => setTableDialog(null)}
+          onApply={(table) => {
+            const d = tableDialog
+            setTableDialog(null)
+            const markdown = serializeTable(table)
+            if (d.via === 'view' && d.range) {
+              commitContent(replaceLines(content, d.range, markdown), 'Edit table')
+              return
+            }
+            const ed = editorRef.current
+            if (!ed) return
+            const text = ed.getValue()
+            if (d.range) {
+              const at = text.split('\n').slice(0, d.range.start).join('\n').length + (d.range.start ? 1 : 0)
+              ed.applyEdit({ text: replaceLines(text, d.range, markdown), selectionStart: at, selectionEnd: at })
+            } else {
+              ed.applyEdit(insertBlock(text, d.from ?? text.length, d.to ?? text.length, markdown))
+            }
+          }}
+        />
+      )}
       {dialog?.kind === 'link' && (
         <NoteDialog
           title="Insert link"

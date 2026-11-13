@@ -101,6 +101,17 @@ export function slugify(text: string, used: Set<string>): string {
   return slug
 }
 
+/**
+ * Each top-level table remembers the source line it starts on, so the viewer
+ * can edit it in place and the table editor can find it (lib/table.ts).
+ */
+md.core.ruler.push('mn_table_lines', (state) => {
+  for (const t of state.tokens) {
+    if (t.type === 'table_open' && t.map && t.level === 0) t.attrSet('data-mn-table', String(t.map[0]))
+  }
+  return true
+})
+
 /** Adds stable ids to headings so the outline panel can scroll to them. */
 md.core.ruler.push('mn_heading_ids', (state) => {
   const used = new Set<string>()

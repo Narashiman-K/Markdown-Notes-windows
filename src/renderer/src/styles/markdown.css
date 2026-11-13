@@ -294,3 +294,6 @@
     color: #555;
   }
 }
+
+/* A table whose header row was turned off: the empty header is not shown. */
+.markdown-body table thead:not(:has(th:not(:empty))) { display: none; }

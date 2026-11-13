@@ -1659,3 +1659,60 @@ html[data-theme='dark'] { --backlit-halo: rgba(255, 150, 60, 0.26); }
 .cmp-slot button.primary {
   box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 12px var(--backlit-glow);
 }
+
+/* ---------------------------------------------------------- table editor */
+.modal.table-editor { width: min(980px, 94vw); max-height: 90vh; display: flex; flex-direction: column; }
+.tbl-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 10px; }
+.tbl-group { display: inline-flex; align-items: center; gap: 3px; }
+.tbl-label { font-size: 12px; color: var(--muted); margin-right: 3px; }
+.tbl-btn {
+  min-width: 30px; height: 28px; padding: 0 7px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--chrome-border); background: var(--chrome); color: var(--fg); font: inherit; font-size: 13px;
+}
+.tbl-btn:disabled { opacity: 0.4; cursor: default; }
+.tbl-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 12px var(--backlit-glow); }
+.tbl-btn:hover:not(:disabled) { box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 10px var(--backlit-soft); }
+.tbl-check { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
+.tbl-grid-wrap {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'grid col' 'row .';
+  gap: 4px; overflow: auto; min-height: 120px; max-height: 58vh; padding: 2px;
+}
+.tbl-grid { grid-area: grid; display: grid; gap: 1px; background: var(--chrome-border); border: 1px solid var(--chrome-border); border-radius: 6px; overflow: hidden; align-self: start; }
+.tbl-cell {
+  border: 0; border-radius: 0; resize: none; min-height: 34px; padding: 7px 9px; margin: 0;
+  background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, 'Segoe UI', sans-serif; field-sizing: content;
+}
+.tbl-cell.head { font-weight: 600; background: var(--chrome); }
+.tbl-cell.off { opacity: 0.35; }
+.tbl-cell:focus, .tbl-cell.at { outline: 2px solid var(--accent); outline-offset: -2px; position: relative; z-index: 1; }
+.tbl-add {
+  border: 1px dashed var(--chrome-border); background: transparent; color: var(--muted); cursor: pointer; border-radius: 6px; font: inherit;
+}
+.tbl-add:hover { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 10px var(--backlit-soft); }
+.tbl-add-col { grid-area: col; width: 28px; align-self: stretch; }
+.tbl-add-row { grid-area: row; height: 28px; font-size: 13px; }
+.tbl-source { margin: 10px 0 0; padding: 8px 10px; max-height: 22vh; overflow: auto; font-size: 12px; background: var(--chrome); border-radius: 6px; white-space: pre; }
+.modal-actions .grow { flex: 1; }
+.modal.table-size { width: 340px; }
+.tbl-size-grid { display: grid; grid-template-columns: repeat(10, 24px); gap: 3px; justify-content: center; }
+.tbl-size-cell { width: 24px; height: 20px; padding: 0; border: 1px solid var(--chrome-border); background: var(--bg); border-radius: 3px; cursor: pointer; }
+.tbl-size-cell.on { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 6px var(--backlit-glow); }
+.tbl-size-label { text-align: center; margin: 10px 0 0; font-size: 13px; }
+
+/* In the viewer: buttons on a hovered table's corner, and a cell being edited. */
+.table-hover-tools {
+  position: fixed; transform: translate(-100%, -100%); z-index: 40; display: flex; align-items: center; gap: 4px;
+  padding: 3px 4px; border-radius: 8px; background: var(--chrome); border: 1px solid var(--backlit-edge);
+  box-shadow: var(--shadow), 0 0 0 1px var(--backlit-edge), 0 0 22px var(--backlit-halo, rgba(255, 140, 40, 0.3));
+  font: 12px system-ui, 'Segoe UI', sans-serif;
+}
+.table-hover-tools button {
+  border: 1px solid var(--chrome-border); background: var(--bg); color: var(--fg); border-radius: 6px; padding: 3px 8px; cursor: pointer; font: inherit;
+}
+.table-hover-tools button:hover { box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 10px var(--backlit-soft); }
+.table-hover-hint { color: var(--muted); padding: 0 4px; }
+.cell-edit {
+  position: fixed; z-index: 45; box-sizing: border-box; padding: 6px 8px; resize: both; field-sizing: content; max-width: 60vw;
+  font: 14px/1.45 system-ui, 'Segoe UI', sans-serif; color: var(--fg); background: var(--bg);
+  border: 2px solid var(--accent); border-radius: 4px; box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 14px var(--backlit-glow);
+}
