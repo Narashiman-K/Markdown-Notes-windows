@@ -627,6 +627,37 @@ function registerIpc(): void {
     }
   })
 
+  /*
+   * The reader's mind map for a document (moved, added and edited cards):
+   * kept in "<name>.mindmap.json" beside it. The name is worked out here, so
+   * the page can only ever read or write that one file next to a document.
+   */
+  const mindmapPath = (docPath: string): string | null => {
+    if (typeof docPath !== 'string' || !docPath || !existsSync(docPath)) return null
+    return join(dirname(docPath), `${basename(docPath).replace(/\.[^.]*$/, '')}.mindmap.json`)
+  }
+  handle('mindmap:load', async (_e, docPath: string) => {
+    const p = mindmapPath(docPath)
+    if (!p || !existsSync(p)) return null
+    try {
+      const stat = await fsp.stat(p)
+      if (stat.size > 8 * 1024 * 1024) return null
+      return await fsp.readFile(p, 'utf8')
+    } catch {
+      return null
+    }
+  })
+  handle('mindmap:save', async (_e, args: { docPath: string; json: string }) => {
+    const p = mindmapPath(args?.docPath)
+    if (!p || typeof args.json !== 'string' || args.json.length > 8 * 1024 * 1024) return { ok: false }
+    try {
+      await fsp.writeFile(p, args.json, 'utf8')
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: String((err as Error).message ?? err) }
+    }
+  })
+
   // A picture made by the app (the mind map): PNG or SVG only, saved where the
   // user picks. The bytes come from the page, so the size is capped.
   handle('file:exportImage', async (_e, args: { bytes: Uint8Array; suggestedName: string }) => {

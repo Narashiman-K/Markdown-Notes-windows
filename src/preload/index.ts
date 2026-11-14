@@ -26,6 +26,8 @@ const api = {
   print: (args: { html: string; title?: string }) => ipcRenderer.invoke('file:print', args),
   exportImage: (args: { bytes: Uint8Array; suggestedName: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string; error?: string }> =>
     ipcRenderer.invoke('file:exportImage', args),
+  mindmapLoad: (docPath: string): Promise<string | null> => ipcRenderer.invoke('mindmap:load', docPath),
+  mindmapSave: (args: { docPath: string; json: string }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('mindmap:save', args),
 
   findStart: (args: { text: string; forward?: boolean; findNext?: boolean }) => ipcRenderer.invoke('find:start', args),
   findStop: () => ipcRenderer.invoke('find:stop'),

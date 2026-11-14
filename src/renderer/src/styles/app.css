@@ -1724,14 +1724,15 @@ html[data-theme='dark'] { --backlit-halo: rgba(255, 150, 60, 0.26); }
   border: 1px solid var(--backlit-edge); box-shadow: 0 0 0 1px var(--backlit-edge), 0 0 14px var(--backlit-halo, rgba(255, 140, 40, 0.3));
 }
 .cm-table-chip:hover { box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 12px var(--backlit-glow); }
-
 /* ------------------------------------------------------------- mind map */
+/* Inside the document area, so the menu and toolbar stay in place. */
+.stage { position: relative; }
 .mindmap-view {
-  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
+  position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column;
   background: var(--bg); color: var(--fg); font: 13px system-ui, 'Segoe UI', sans-serif;
 }
 .mm-bar {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 8px 12px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 7px 12px;
   background: var(--chrome); border-bottom: 1px solid var(--backlit-edge); box-shadow: 0 6px 22px var(--backlit-soft);
 }
 .mm-bar button {
@@ -1739,13 +1740,16 @@ html[data-theme='dark'] { --backlit-halo: rgba(255, 150, 60, 0.26); }
   padding: 4px 10px; cursor: pointer; font: inherit;
 }
 .mm-bar button:hover:not(:disabled) { box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 10px var(--backlit-soft); }
-.mm-bar button:disabled { opacity: 0.5; cursor: default; }
-.mm-bar .segmented button { border-radius: 0; }
+.mm-bar button:disabled { opacity: 0.45; cursor: default; }
+.mm-bar button.on { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 12px var(--backlit-glow); }
+.mm-crumbs { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.mm-sep { color: var(--muted); }
+.mm-here { font-weight: 600; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mm-group { display: inline-flex; gap: 4px; }
 .mm-check { display: inline-flex; align-items: center; gap: 5px; }
 .mm-ai { border-color: var(--accent) !important; }
 .mm-bar .grow { flex: 1; }
-.mm-close { border: 0 !important; background: none !important; font-size: 16px !important; }
+.mm-close { font-weight: 600; }
 .mm-banner {
   display: flex; align-items: center; gap: 12px; padding: 7px 14px; font-size: 13px;
   background: rgba(255, 140, 40, 0.12); border-bottom: 1px solid rgba(255, 140, 40, 0.35);
@@ -1753,7 +1757,36 @@ html[data-theme='dark'] { --backlit-halo: rgba(255, 150, 60, 0.26); }
 .mm-banner.busy { background: rgba(15, 108, 189, 0.12); border-bottom-color: var(--backlit-edge); }
 .mm-canvas { flex: 1; position: relative; overflow: hidden; cursor: grab; touch-action: none; }
 .mm-canvas:active { cursor: grabbing; }
-.mm-node rect:first-child { transition: filter 0.15s; }
-.mm-node:hover rect:first-child { filter: drop-shadow(0 0 6px rgba(255, 140, 40, 0.55)); }
+.mm-node > rect:first-child { transition: filter 0.15s; }
+.mm-node:hover > rect:first-child { filter: drop-shadow(0 0 7px rgba(255, 140, 40, 0.55)); }
 .mm-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 20px; text-align: center; }
 .mm-foot { padding: 5px 12px; font-size: 12px; color: var(--muted); background: var(--chrome); border-top: 1px solid var(--chrome-border); }
+.modal.mm-peek { width: min(820px, 92vw); max-height: 86vh; display: flex; flex-direction: column; }
+.mm-peek-card { border-left: 4px solid var(--accent); background: var(--chrome); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.mm-peek-keys { color: #e0812e; font-weight: 600; font-size: 12.5px; margin-bottom: 4px; }
+.mm-peek-idea { font-weight: 600; margin-bottom: 4px; }
+.mm-peek-sum { color: var(--fg); opacity: 0.9; }
+.mm-peek-src { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+.mm-peek-text { overflow: auto; flex: 1; min-height: 80px; padding: 4px 6px; font-size: 14.5px; border-top: 1px solid var(--chrome-border); }
+.modal.mm-edit { width: min(560px, 92vw); }
+.mm-edit label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 13px; }
+.mm-edit label span { color: var(--muted); }
+.mm-edit input { padding: 7px 9px; border: 1px solid var(--chrome-border); border-radius: var(--radius); background: var(--bg); color: var(--fg); font: inherit; }
+.mm-back { position: absolute; left: 16px; bottom: 16px; z-index: 25; display: flex; align-items: center; gap: 6px; }
+.mm-back .primary {
+  padding: 7px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer;
+  font: 13px system-ui, 'Segoe UI', sans-serif; box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 14px var(--backlit-glow);
+}
+
+}
+
+.mm-kinds button { padding: 4px 12px; }
+.mm-flow-list {
+  position: absolute; left: 10px; top: 10px; bottom: 10px; width: 230px; overflow: auto; z-index: 2;
+  display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 10px;
+  background: var(--chrome); border: 1px solid var(--backlit-edge); box-shadow: var(--shadow), 0 0 22px var(--backlit-halo, rgba(255, 140, 40, 0.3));
+}
+.mm-flow-head { font-weight: 600; margin-bottom: 4px; }
+.mm-flow-list button { text-align: left; border: 1px solid var(--chrome-border); background: var(--bg); color: var(--fg); border-radius: 6px; padding: 6px 8px; cursor: pointer; font: inherit; }
+.mm-flow-list button.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 10px var(--backlit-glow); }
+.mm-flow-list p { margin: 4px 0; font-size: 12.5px; }

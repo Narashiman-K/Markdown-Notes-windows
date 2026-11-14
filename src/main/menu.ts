@@ -79,7 +79,7 @@ export function buildMenu(win: BrowserWindow, send: Send): void {
         { label: 'View Mode', accelerator: 'CmdOrCtrl+Shift+V', click: () => send('view:mode:view') },
         { label: 'Edit Mode', accelerator: 'CmdOrCtrl+E', click: () => send('view:mode:edit') },
         { label: 'Reader Mode', accelerator: 'F9', click: () => send('view:reader') },
-        { label: 'Mind Map and Flowchart', click: () => send('view:mindmap') },
+        { label: 'Mind Map (Alt+M)', click: () => send('view:mindmap') },
         { type: 'separator' },
         { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => send('view:zoom:in') },
         { label: 'Zoom In ', accelerator: 'CmdOrCtrl+=', visible: false, click: () => send('view:zoom:in') },

@@ -1,35 +1,52 @@
 /**
- * Mind map and flowchart of the document's headings, full window.
+ * Mind maps for revision and fast recall, inside the document area (the
+ * menu and toolbar stay in place).
  *
- * Mind map: the document in the middle, its topics branching out to both
- * sides. Flowchart: the same tree, top to bottom. Each topic shows a short
- * summary: an instant offline one (lib/mindmap.ts), or one written by the AI
- * set up in the AI panel when asked. Without an AI connected the map still
- * works, and says why there are no AI summaries.
+ * Two levels:
+ *   - the book overview: the book and its chapters, in reading order from the
+ *     top left, each card showing the chapter's key idea, keywords and a
+ *     two-sentence summary;
+ *   - one detailed map per chapter: its topics and one card per paragraph,
+ *     laid out from the top left in reading order.
  *
- * Wheel zooms, dragging the background pans, the small round button on a
- * topic folds its branch, and clicking a topic jumps to it in the document.
- * Export as PNG or SVG, print, or insert the map into the document as a
- * Mermaid diagram.
+ * Clicking a card shows its passage in a popup on the same screen; from
+ * there it can be opened in the document (with a way back to the map).
+ * Cards can be dragged to new places (a card's branch moves with it), added,
+ * edited and removed; all of that, and AI-written cards, is saved beside the
+ * document (lib/mindmap.ts MapState) and never changes the document itself.
  *
- * Drawn as plain SVG with every colour written on the element, so an exported
- * picture looks the same anywhere.
+ * Drawn as plain SVG with every colour on the element, so exported pictures
+ * look the same anywhere.
  *
  * Kept identical across the Windows app and the web app.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { buildTree, countNodes, plainText, toMermaidFlowchart, toMermaidMindmap, walk, type MapNode } from '../lib/mindmap'
-
-type Mode = 'map' | 'flow'
-/** Flowchart direction: top to bottom, or left to right. */
-type Dir = 'down' | 'right'
+import {
+  applyState,
+  buildTree,
+  findNode,
+  plainText,
+  readState,
+  toMermaidMindmap,
+  walk,
+  EMPTY_STATE,
+  type Card,
+  type MapNode,
+  type MapState
+} from '../lib/mindmap'
+import { renderMarkdown } from '../lib/markdown'
+import { findProcesses, flowFromSteps, type FlowNode, type Process } from '../lib/flowchart'
 
 interface Props {
   source: string
   name: string
   dark: boolean
+  /** The chapter map to open, or null for the book overview. */
+  focus: string | null
+  onFocus: (id: string | null) => void
   onClose: () => void
-  onJump: (node: { slug: string; line: number }) => void
+  /** Show a passage in the document; the app offers the way back. */
+  onShowInDocument: (node: { slug: string; line: number }) => void
   onInsert: (mermaid: string) => void
   ai: {
     status: () => Promise<{ ready: boolean; detail: string }>
@@ -37,13 +54,16 @@ interface Props {
   }
   saveImage: (name: string, data: Blob) => Promise<void>
   print: (html: string) => Promise<void>
+  /** The reader's saved map for this document (JSON), or null. */
+  loadState: () => Promise<string | null>
+  /** Saves it; false when the document has no file yet. */
+  saveState: (json: string) => Promise<boolean>
 }
 
 const PALETTE = ['#4C9BE8', '#F28C38', '#4FB487', '#A77BE0', '#E2678C', '#36AFC0', '#C9A227', '#7F93AD']
-const NODE_W = 236
+const W = 268
 const FONT = "system-ui, 'Segoe UI', sans-serif"
 
-/** Wraps text into lines of about `chars` characters. */
 function wrap(text: string, chars: number, maxLines: number): string[] {
   const words = text.split(/\s+/).filter(Boolean)
   const lines: string[] = []
@@ -56,9 +76,7 @@ function wrap(text: string, chars: number, maxLines: number): string[] {
     } else cur = (cur + ' ' + w).trim()
   }
   if (lines.length < maxLines && cur) lines.push(cur)
-  if (lines.length === maxLines && words.join(' ').length > lines.join(' ').length) {
-    lines[maxLines - 1] = lines[maxLines - 1].replace(/\s*\S*$/, '') + '…'
-  }
+  if (lines.length === maxLines && words.join(' ').length > lines.join(' ').length) lines[maxLines - 1] = lines[maxLines - 1].replace(/\s*\S*$/, '') + '…'
   return lines
 }
 
@@ -67,227 +85,392 @@ interface Placed {
   depth: number
   x: number
   y: number
-  w: number
   h: number
   title: string[]
+  keys: string
   sum: string[]
   color: string
-  side: 1 | -1
-  kids: number
-  folded: boolean
+  badge?: string
+  parent?: Placed
 }
 
-function layout(root: MapNode, mode: Mode, dir: Dir, folded: Set<string>, summaries: (n: MapNode) => string, showSum: boolean) {
-  // Laid out sideways (topics stacked down the page): the mind map, and the
-  // flowchart drawn left to right.
-  const across = mode === 'map' || dir === 'right'
-  const box = (n: MapNode, depth: number): { title: string[]; sum: string[]; w: number; h: number } => {
-    const title = wrap(n.title, depth === 0 ? 24 : 30, depth === 0 ? 3 : 2)
-    const s = showSum ? summaries(n) : ''
-    const sum = s ? wrap(s, 36, depth === 0 ? 3 : 4) : []
-    const lineH = depth === 0 ? 20 : 17
-    return { title, sum, w: NODE_W, h: 18 + title.length * lineH + (sum.length ? 6 + sum.length * 15 : 0) }
-  }
-  const placed: Placed[] = []
-  const edges: Array<{ a: Placed; b: Placed }> = []
-  const GAP = across ? 14 : 26
-  const STEP = across ? NODE_W + 80 : 0
+/** Card text laid out: title, keywords, summary. */
+function measure(n: MapNode, showSum: boolean, isRoot: boolean): { title: string[]; keys: string; sum: string[]; h: number } {
+  const title = wrap(n.kind === 'point' ? n.card.idea || n.title : n.title, isRoot ? 26 : 32, n.kind === 'point' ? 3 : 2)
+  const keys = n.card.keywords.length ? n.card.keywords.slice(0, 4).map((k) => `#${k}`).join('  ') : ''
+  const sum = showSum && n.card.summary ? wrap(n.card.summary, 40, 4) : []
+  const h = 14 + title.length * (isRoot ? 20 : 17) + (keys ? 17 : 0) + (sum.length ? 5 + sum.length * 15 : 0) + 10
+  return { title, keys, sum, h }
+}
 
-  // Breadth of a subtree: heights stacked (mind map) or widths side by side (flowchart).
-  const sizeOf = new Map<string, number>()
-  const measure = (n: MapNode, depth: number): number => {
-    const b = box(n, depth)
-    const own = across ? b.h : b.w
-    const kids = folded.has(n.id) ? [] : n.children
-    const sum = kids.reduce((t, c) => t + measure(c, depth + 1), 0) + Math.max(0, kids.length - 1) * GAP
-    const s = Math.max(own, sum)
-    sizeOf.set(n.id, s)
-    return s
-  }
-
-  // Flowchart rows: each depth as tall as its tallest topic.
-  const rowH: number[] = []
-  if (!across) walk(root, (n, d) => (rowH[d] = Math.max(rowH[d] ?? 0, box(n, d).h)))
-  const rowY = (d: number): number => rowH.slice(0, d).reduce((t, h) => t + h + 70, 0)
-
-  const place = (n: MapNode, depth: number, start: number, side: 1 | -1, color: string, parent: Placed | null): void => {
-    const b = box(n, depth)
-    const size = sizeOf.get(n.id) ?? 0
-    const mid = start + size / 2
-    const p: Placed = {
-      n,
-      depth,
-      x: across ? side * depth * STEP : mid,
-      y: across ? mid : rowY(depth) + b.h / 2,
-      w: b.w,
-      h: b.h,
-      title: b.title,
-      sum: b.sum,
-      color,
-      side,
-      kids: n.children.length,
-      folded: folded.has(n.id)
-    }
-    placed.push(p)
-    if (parent) edges.push({ a: parent, b: p })
-    if (p.folded) return
-    const kids = n.children
-    const total = kids.reduce((t, c) => t + (sizeOf.get(c.id) ?? 0), 0) + Math.max(0, kids.length - 1) * GAP
-    let at = mid - total / 2
-    kids.forEach((c, i) => {
-      const col = depth === 0 ? PALETTE[i % PALETTE.length] : color
-      place(c, depth + 1, at, side, col, p)
-      at += (sizeOf.get(c.id) ?? 0) + GAP
+/** Book overview: the book first, then its chapters in rows, reading order. */
+function overviewLayout(root: MapNode, showSum: boolean, cols: number): Placed[] {
+  const out: Placed[] = []
+  const rm = measure(root, showSum, true)
+  const rp: Placed = { n: root, depth: 0, x: 0, y: 0, ...rm, color: '#888' }
+  out.push(rp)
+  let top = rm.h + 46
+  const kids = root.children
+  for (let i = 0; i < kids.length; i += cols) {
+    const row = kids.slice(i, i + cols).map((k, j) => ({ k, m: measure(k, showSum, false), idx: i + j }))
+    const rowH = Math.max(...row.map((r) => r.m.h))
+    row.forEach(({ k, m, idx }, j) => {
+      out.push({ n: k, depth: 1, x: j * (W + 34), y: top, ...m, color: PALETTE[idx % PALETTE.length], badge: String(idx + 1), parent: rp })
     })
+    top += rowH + 30
   }
-
-  if (mode === 'flow') {
-    measure(root, 0)
-    place(root, 0, 0, 1, '#888', null)
-  } else {
-    // Topics split between the two sides, balancing their height.
-    const rb = box(root, 0)
-    const rootP: Placed = { n: root, depth: 0, x: 0, y: 0, w: rb.w, h: rb.h, title: rb.title, sum: rb.sum, color: '#888', side: 1, kids: root.children.length, folded: folded.has(root.id) }
-    placed.push(rootP)
-    if (!rootP.folded) {
-      const kids = root.children.map((c, i) => ({ c, i, s: measure(c, 1) }))
-      const total = kids.reduce((t, k) => t + k.s, 0)
-      let acc = 0
-      const right = kids.filter((k) => (acc += k.s) <= total / 2 + k.s / 2 || k.i === 0)
-      const left = kids.filter((k) => !right.includes(k))
-      for (const [group, side] of [
-        [right, 1],
-        [left, -1]
-      ] as const) {
-        const height = group.reduce((t, k) => t + k.s, 0) + Math.max(0, group.length - 1) * GAP
-        let at = -height / 2
-        for (const k of group) {
-          place(k.c, 1, at, side, PALETTE[k.i % PALETTE.length], rootP)
-          at += k.s + GAP
-        }
-      }
-    }
-  }
-
-  let minX = Infinity
-  let minY = Infinity
-  let maxX = -Infinity
-  let maxY = -Infinity
-  for (const p of placed) {
-    minX = Math.min(minX, p.x - p.w / 2)
-    maxX = Math.max(maxX, p.x + p.w / 2)
-    minY = Math.min(minY, p.y - p.h / 2)
-    maxY = Math.max(maxY, p.y + p.h / 2)
-  }
-  const pad = 40
-  return { placed, edges, bounds: { x: minX - pad, y: minY - pad, w: maxX - minX + 2 * pad, h: maxY - minY + 2 * pad } }
+  return out
 }
+
+/** A topic's paragraph cards, drawn as one numbered group in a soft frame. */
+interface Group {
+  ids: string[]
+  parent: string
+  color: string
+}
+
+/**
+ * Chapter map: a tree from the top left. Each topic's paragraph cards sit in
+ * a numbered grid (reading order: left to right, top to bottom) inside a
+ * frame; its sub-topics branch out below that.
+ */
+function treeLayout(root: MapNode, showSum: boolean, color: string): { placed: Placed[]; groups: Group[] } {
+  const out: Placed[] = []
+  const groups: Group[] = []
+  const GX = 18
+  const place = (n: MapNode, x: number, depth: number, top: number, col: string, parent?: Placed): number => {
+    const m = measure(n, showSum, depth === 0)
+    const p: Placed = { n, depth, x, y: top, ...m, color: col, parent }
+    out.push(p)
+    const leaves = n.children.filter((c) => (c.kind === 'point' || c.kind === 'custom') && !c.children.length)
+    const branches = n.children.filter((c) => !leaves.includes(c))
+    const childX = x + W + 64
+    let y = top
+    if (leaves.length) {
+      const cols = leaves.length >= 7 ? 3 : leaves.length >= 3 ? 2 : 1
+      for (let i = 0; i < leaves.length; i += cols) {
+        const row = leaves.slice(i, i + cols).map((c) => ({ c, m: measure(c, showSum, false) }))
+        const rowH = Math.max(...row.map((r) => r.m.h))
+        row.forEach(({ c, m: cm }, j) => {
+          out.push({ n: c, depth: depth + 1, x: childX + 12 + j * (W + GX), y: y + 12, ...cm, color: col, badge: String(i + j + 1), parent: p })
+        })
+        y += rowH + GX
+      }
+      y += 24
+      groups.push({ ids: leaves.map((c) => c.id), parent: n.id, color: col })
+    }
+    branches.forEach((c, i) => {
+      const cc = depth === 0 ? PALETTE[(i + 1) % PALETTE.length] : col
+      y += place(c, childX, depth + 1, y, cc, p) + 18
+    })
+    return Math.max(m.h, y - top - 18)
+  }
+  place(root, 0, 0, 0, color)
+  return { placed: out, groups }
+}
+
+/** A flowchart laid out: nodes in rows, the main path down the middle, a "No" path beside it. */
+function flowLayout(steps: string[]) {
+  const { nodes, edges } = flowFromSteps(steps)
+  const FW = 300
+  const sized = nodes.map((n) => {
+    const lines = n.kind === 'start' || n.kind === 'end' ? [n.text] : wrap(n.text, n.kind === 'decision' ? 24 : 38, 5)
+    const h = n.kind === 'decision' ? 70 + lines.length * 16 : n.kind === 'step' ? 22 + lines.length * 17 : 40
+    const w = n.kind === 'decision' ? 300 : n.kind === 'step' ? FW : 150
+    return { ...n, lines, w, h }
+  })
+  const rows = Math.max(...sized.map((n) => n.row)) + 1
+  const rowTop: number[] = []
+  let y = 0
+  for (let r = 0; r < rows; r++) {
+    rowTop[r] = y
+    y += Math.max(40, ...sized.filter((n) => n.row === r).map((n) => n.h)) + 46
+  }
+  const laid = sized.map((n) => ({ ...n, cx: n.col === 0 ? 0 : 400, cy: rowTop[n.row] + n.h / 2 }))
+  return { nodes: laid, edges }
+}
+type FlowLaid = ReturnType<typeof flowLayout>['nodes'][number]
 
 export default function MindMapView(props: Props): React.JSX.Element {
   const { dark } = props
-  const tree = useMemo(() => buildTree(props.source, props.name), [props.source, props.name])
-  const total = useMemo(() => countNodes(tree), [tree])
-  const [mode, setMode] = useState<Mode>('map')
-  // A wide top level reads better left to right.
-  const [dir, setDir] = useState<Dir>(() => (tree.children.length > 6 ? 'right' : 'down'))
+  const base = useMemo(() => buildTree(props.source, props.name), [props.source, props.name])
+  const [state, setState] = useState<MapState>(EMPTY_STATE)
+  const [loaded, setLoaded] = useState(false)
+  const tree = useMemo(() => applyState(base, state), [base, state])
+  const focusNode = props.focus ? findNode(tree, props.focus) : null
   const [showSum, setShowSum] = useState(true)
-  const [folded, setFolded] = useState<Set<string>>(() => {
-    // A big document starts with only its main topics open.
-    const f = new Set<string>()
-    if (total > 45) walk(tree, (n, d) => d >= 1 && n.children.length && f.add(n.id))
-    return f
-  })
-  const [aiSum, setAiSum] = useState<Map<string, string>>(new Map())
-  const [aiState, setAiState] = useState<{ ready: boolean | null; detail: string }>({ ready: null, detail: '' })
-  const [progress, setProgress] = useState<string>('')
-  const [banner, setBanner] = useState<string>('')
-  const [view, setView] = useState({ x: 0, y: 0, k: 1 })
+  const [kind, setKind] = useState<'map' | 'flow'>('map')
+  const [flowAt, setFlowAt] = useState(0)
+  const [aiFlow, setAiFlow] = useState<Record<string, Process>>({})
+  const [view, setView] = useState({ x: 30, y: 30, k: 1 })
+  const [drag, setDrag] = useState<{ id: string; dx: number; dy: number } | null>(null)
+  const [hover, setHover] = useState<string | null>(null)
+  const [peek, setPeek] = useState<MapNode | null>(null)
+  const [editing, setEditing] = useState<{ node: MapNode | null; parent?: string; draft: { title: string } & Card } | null>(null)
+  const [banner, setBanner] = useState('')
+  const [progress, setProgress] = useState('')
+  const [unsaved, setUnsaved] = useState(false)
   const hostRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const alive = useRef(true)
   useEffect(() => () => void (alive.current = false), [])
 
-  const summaryOf = useCallback((n: MapNode) => aiSum.get(n.id) ?? n.summary, [aiSum])
-  const { placed, edges, bounds } = useMemo(() => layout(tree, mode, dir, folded, summaryOf, showSum), [tree, mode, dir, folded, summaryOf, showSum])
-
   const colors = dark
-    ? { bg: '#1b1d22', card: '#262a31', text: '#e8e8e8', muted: '#a9b0ba', rootText: '#ffffff', root: '#2f6fb0' }
-    : { bg: '#fbfbfc', card: '#ffffff', text: '#1f2328', muted: '#5f6670', rootText: '#ffffff', root: '#0f6cbd' }
+    ? { bg: '#1b1d22', card: '#262a31', text: '#e8e8e8', muted: '#a9b0ba', root: '#2f6fb0', key: '#f2a65a' }
+    : { bg: '#f6f7f9', card: '#ffffff', text: '#1f2328', muted: '#5f6670', root: '#0f6cbd', key: '#c25e00' }
 
-  // Fit the whole map in the window.
-  const fit = useCallback(() => {
-    const host = hostRef.current
-    if (!host) return
-    const k = Math.min(1.2, Math.max(0.15, Math.min(host.clientWidth / bounds.w, host.clientHeight / bounds.h)))
-    setView({ k, x: (host.clientWidth - bounds.w * k) / 2 - bounds.x * k, y: (host.clientHeight - bounds.h * k) / 2 - bounds.y * k })
-  }, [bounds])
-  const fitKey = `${mode}-${dir}`
-  useEffect(() => fit(), [fitKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  /* ------------------------------------------------------------ saving */
+  useEffect(() => {
+    void props.loadState().then((json) => {
+      if (!alive.current) return
+      setState(readState(json))
+      setLoaded(true)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (!loaded) return
+    const t = window.setTimeout(() => {
+      void props.saveState(JSON.stringify(state)).then((ok) => alive.current && setUnsaved(!ok))
+    }, 500)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, loaded])
+  const change = (fn: (s: MapState) => MapState): void => setState((s) => fn(s))
 
-  // Is an AI connected? Without one the map still works; it just says so.
+  /* ------------------------------------------------------------ layout */
+  const host = hostRef.current
+  const cols = Math.max(2, Math.min(4, Math.floor(((host?.clientWidth ?? 1100) - 60) / (W + 34))))
+  const laidOut = useMemo(() => {
+    const laid = focusNode
+      ? treeLayout(focusNode, showSum, PALETTE[Math.max(0, tree.children.findIndex((c) => c.id === focusNode.id)) % PALETTE.length])
+      : { placed: overviewLayout(tree, showSum, cols), groups: [] as Group[] }
+    const raw = laid.placed
+    // Cards moved by hand: the offset applies to the card and its branch.
+    const off = new Map<Placed, { dx: number; dy: number }>()
+    for (const p of raw) {
+      const own = state.moved[p.n.id] ?? { dx: 0, dy: 0 }
+      const live = drag && drag.id === p.n.id ? { dx: drag.dx, dy: drag.dy } : { dx: 0, dy: 0 }
+      const up = p.parent && focusNode ? (off.get(p.parent) ?? { dx: 0, dy: 0 }) : { dx: 0, dy: 0 }
+      const o = { dx: up.dx + own.dx + live.dx, dy: up.dy + own.dy + live.dy }
+      off.set(p, o)
+    }
+    const moved = raw.map((p) => ({ ...p, x: p.x + off.get(p)!.dx, y: p.y + off.get(p)!.dy }))
+    const at = new Map(moved.map((p) => [p.n.id, p]))
+    for (const p of moved) if (p.parent) p.parent = at.get(p.parent.n.id)
+    // Each group's frame wraps its cards wherever they have been moved to.
+    const frames = laid.groups
+      .map((g) => {
+        const ps = g.ids.map((id) => at.get(id)).filter((p): p is Placed => !!p)
+        if (!ps.length) return null
+        const x0 = Math.min(...ps.map((p) => p.x)) - 12
+        const y0 = Math.min(...ps.map((p) => p.y)) - 12
+        const x1 = Math.max(...ps.map((p) => p.x + W)) + 12
+        const y1 = Math.max(...ps.map((p) => p.y + p.h)) + 12
+        return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, color: g.color, parent: at.get(g.parent), ids: new Set(g.ids) }
+      })
+      .filter((f): f is NonNullable<typeof f> => !!f)
+    return { cards: moved, frames }
+  }, [tree, focusNode, showSum, cols, state.moved, drag])
+  const placed = laidOut.cards
+  const frames = laidOut.frames
+
+  const scopeId = focusNode?.id ?? 'doc'
+  const processes = useMemo(() => {
+    const found = findProcesses(props.source, focusNode ? focusNode.line : 0, focusNode ? focusNode.end : undefined)
+    return aiFlow[scopeId] ? [aiFlow[scopeId], ...found] : found
+  }, [props.source, focusNode, aiFlow, scopeId])
+  const flow = useMemo(() => (kind === 'flow' && processes[flowAt] ? flowLayout(processes[flowAt].steps) : null), [kind, processes, flowAt])
+  useEffect(() => setFlowAt(0), [scopeId])
+
+  const bounds = useMemo(() => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    if (flow) {
+      for (const n of flow.nodes) {
+        x0 = Math.min(x0, n.cx - n.w / 2)
+        x1 = Math.max(x1, n.cx + n.w / 2)
+        y0 = Math.min(y0, n.cy - n.h / 2)
+        y1 = Math.max(y1, n.cy + n.h / 2)
+      }
+      return { x: x0 - 50, y: y0 - 30, w: x1 - x0 + 100, h: y1 - y0 + 60 }
+    }
+    for (const p of [...placed, ...frames.map((f) => ({ x: f.x, y: f.y, h: f.h, w: f.w }))] as Array<{ x: number; y: number; h: number; w?: number }>) {
+      x0 = Math.min(x0, p.x)
+      y0 = Math.min(y0, p.y)
+      x1 = Math.max(x1, p.x + (p.w ?? W))
+      y1 = Math.max(y1, p.y + p.h)
+    }
+    const pad = 30
+    return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + 2 * pad, h: y1 - y0 + 2 * pad }
+  }, [placed, frames, flow])
+
+  // A new map opens at its top left, at a readable size.
+  useEffect(() => setView({ x: 30, y: 24, k: 1 }), [props.focus])
+  const fit = (): void => {
+    const h = hostRef.current
+    if (!h) return
+    const k = Math.min(1.2, Math.max(0.15, Math.min(h.clientWidth / bounds.w, h.clientHeight / bounds.h)))
+    setView({ k, x: -bounds.x * k + (h.clientWidth - bounds.w * k) / 2, y: -bounds.y * k + 10 })
+  }
+
+  /* ---------------------------------------------------- AI connection */
   useEffect(() => {
     void props.ai.status().then((s) => {
-      if (!alive.current) return
-      setAiState(s)
-      if (!s.ready) {
-        setBanner(
-          'No AI is connected (local Ollama or an API key), so AI summaries were not generated. Each topic shows a quick offline summary instead. Connect one in the AI panel for AI summaries.'
-        )
+      if (alive.current && !s.ready) {
+        setBanner('No AI is connected (local Ollama or an API key), so AI cards were not made. Each card shows a quick offline summary. Connect one in the AI panel for AI cards.')
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    const k = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') props.onClose()
-    }
-    window.addEventListener('keydown', k)
-    return () => window.removeEventListener('keydown', k)
-  }, [props])
+  const passage = (n: MapNode): string => (n.line >= 0 ? props.source.split('\n').slice(n.line, n.end).join('\n') : '')
 
-  /* --------------------------------------------------------- AI summaries */
-  const aiSummaries = async (): Promise<void> => {
+  const aiCards = async (): Promise<void> => {
     const s = await props.ai.status()
-    setAiState(s)
     if (!s.ready) {
-      setBanner(
-        `No AI is connected (local Ollama or an API key), so AI summaries were not generated${s.detail ? ` (${s.detail})` : ''}. The quick offline summaries stay. Connect one in the AI panel, then try again.`
-      )
+      setBanner(`No AI is connected (local Ollama or an API key), so AI cards were not made${s.detail ? ` (${s.detail})` : ''}. The offline cards stay. Connect one in the AI panel, then try again.`)
       return
     }
     setBanner('')
+    const scope = focusNode ?? tree
     const todo: MapNode[] = []
-    walk(tree, (n) => plainText(n.body).length > 40 && !aiSum.has(n.id) && todo.push(n))
-    const next = new Map(aiSum)
-    for (let i = 0; i < todo.length && alive.current; i += 8) {
-      const batch = todo.slice(i, i + 8)
-      setProgress(`Writing AI summaries: ${Math.min(i + 8, todo.length)} of ${todo.length}…`)
-      const user = batch.map((n) => `### ${n.id}: ${n.title}\n${plainText(n.body).slice(0, 1400)}`).join('\n\n')
+    walk(scope, (n, d) => {
+      if (!focusNode && d > 1) return
+      if (n.kind !== 'custom' && n.source === 'offline' && plainText(passage(n)).length > 40) todo.push(n)
+    })
+    const ai: Record<string, Card> = {}
+    for (let i = 0; i < todo.length && alive.current; i += 6) {
+      const batch = todo.slice(i, i + 6)
+      setProgress(`Writing AI cards: ${Math.min(i + 6, todo.length)} of ${todo.length}…`)
+      const user = batch.map((n) => `### ${n.id}\nTitle: ${n.kind === 'point' ? '(a paragraph)' : n.title}\n${plainText(passage(n)).slice(0, 2400)}`).join('\n\n')
       const r = await props.ai.ask(
-        'You summarise sections of a document for a mind map. For each section below, write one or two plain sentences, at most 30 words, saying what it covers. Reply with JSON only, mapping each section id to its summary, like {"h3": "…", "h4": "…"}. No other text.',
+        'You turn passages of a document into revision cards for a mind map, so a reader can glance at a card and recall the whole passage. For each passage write: "idea": the single key idea, at most 15 words; "keywords": 2 to 4 short trigger words or phrases from the passage; "summary": exactly two plain sentences with the essential points (facts, steps, reasons, examples), no filler. Write in the passage\'s own language. Reply with JSON only, keyed by passage id: {"<id>": {"idea": "…", "keywords": ["…"], "summary": "…"}}.',
         user
       )
       if (!r.ok) {
-        setBanner(`The AI could not write summaries (${r.error ?? 'no answer'}). The quick offline summaries stay.`)
+        setBanner(`The AI could not make cards (${r.error ?? 'no answer'}). The offline cards stay.`)
         break
       }
       try {
-        const json = JSON.parse(String(r.text ?? '').replace(/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/, '$1')) as Record<string, string>
-        for (const n of batch) if (typeof json[n.id] === 'string' && json[n.id].trim()) next.set(n.id, json[n.id].trim())
-        if (alive.current) setAiSum(new Map(next))
+        const json = JSON.parse(String(r.text ?? '').replace(/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/, '$1')) as Record<string, Partial<Card>>
+        for (const n of batch) {
+          const c = json[n.id]
+          if (c && typeof c.idea === 'string') ai[n.id] = { idea: c.idea.trim(), keywords: Array.isArray(c.keywords) ? c.keywords.map(String).slice(0, 4) : n.card.keywords, summary: String(c.summary ?? n.card.summary).trim() }
+        }
+        if (alive.current) change((st) => ({ ...st, ai: { ...st.ai, ...ai } }))
       } catch {
-        /* an answer that is not JSON: those topics keep their offline summary */
+        /* not JSON: those cards keep their offline text */
       }
     }
     if (alive.current) setProgress('')
   }
 
-  /* -------------------------------------------------------------- export */
+  /** Asks the AI to turn this part's main process into numbered steps. */
+  const aiSteps = async (): Promise<void> => {
+    const s = await props.ai.status()
+    if (!s.ready) {
+      setBanner('No AI is connected (local Ollama or an API key), so a flowchart could not be made from the text. Flowcharts are still made from any numbered steps in the document.')
+      return
+    }
+    setProgress('Asking the AI for the steps…')
+    const text = plainText(focusNode ? passage(focusNode) : props.source).slice(0, 12000)
+    const r = await props.ai.ask(
+      'You turn the main process or method described in a passage into a flowchart. Reply with numbered steps only, one per line ("1. …"), each a short instruction of at most 15 words. Write a decision as a yes/no question ending in "?", and put its "no" path as the very next step starting with "Otherwise". Use 4 to 14 steps. No other text.',
+      text
+    )
+    if (!alive.current) return
+    setProgress('')
+    const p = r.ok ? findProcesses(String(r.text ?? ''))[0] : undefined
+    if (!p) {
+      setBanner(`The AI could not make steps from this text${r.ok ? '' : ` (${r.error ?? 'no answer'})`}.`)
+      return
+    }
+    setAiFlow((a) => ({ ...a, [scopeId]: { ...p, title: `${focusNode?.title ?? 'This document'} (steps by AI)`, line: focusNode?.line ?? 0 } }))
+    setFlowAt(0)
+  }
+
+  /* ------------------------------------------------------ pan, zoom, drag */
+  const pan = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null)
+  const press = useRef<{ id: string; x: number; y: number; moved: boolean; dx: number; dy: number } | null>(null)
+  const onWheel = (e: React.WheelEvent): void => {
+    const r = hostRef.current!.getBoundingClientRect()
+    const px = e.clientX - r.left
+    const py = e.clientY - r.top
+    const k2 = Math.min(3, Math.max(0.12, view.k * Math.exp(-e.deltaY * 0.0015)))
+    setView({ k: k2, x: px - ((px - view.x) / view.k) * k2, y: py - ((py - view.y) / view.k) * k2 })
+  }
+  const zoomBy = (f: number): void => {
+    const h = hostRef.current!
+    const px = h.clientWidth / 2
+    const py = h.clientHeight / 2
+    const k2 = Math.min(3, Math.max(0.12, view.k * f))
+    setView({ k: k2, x: px - ((px - view.x) / view.k) * k2, y: py - ((py - view.y) / view.k) * k2 })
+  }
+  const onCardDown = (e: React.PointerEvent, n: MapNode): void => {
+    e.stopPropagation()
+    press.current = { id: n.id, x: e.clientX, y: e.clientY, moved: false, dx: 0, dy: 0 }
+    try {
+      ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+    } catch {
+      /* no live pointer (a synthetic event): dragging still works without capture */
+    }
+  }
+  const onCardMove = (e: React.PointerEvent): void => {
+    const p = press.current
+    if (!p) return
+    const dx = (e.clientX - p.x) / view.k
+    const dy = (e.clientY - p.y) / view.k
+    if (!p.moved && Math.hypot(dx, dy) * view.k < 5) return
+    p.moved = true
+    p.dx = dx
+    p.dy = dy
+    setDrag({ id: p.id, dx, dy })
+  }
+  const onCardUp = (n: MapNode): void => {
+    const p = press.current
+    press.current = null
+    if (p?.moved) {
+      change((s) => {
+        const prev = s.moved[n.id] ?? { dx: 0, dy: 0 }
+        return { ...s, moved: { ...s.moved, [n.id]: { dx: prev.dx + p.dx, dy: prev.dy + p.dy } } }
+      })
+      setDrag(null)
+      return
+    }
+    setDrag(null)
+    setPeek(n)
+  }
+
+  /* ---------------------------------------------------------- editing */
+  const openEdit = (node: MapNode | null, parent?: string): void =>
+    setEditing({
+      node,
+      parent,
+      draft: node ? { title: node.title, ...node.card, keywords: [...node.card.keywords] } : { title: '', idea: '', keywords: [], summary: '' }
+    })
+  const saveEdit = (): void => {
+    if (!editing) return
+    const { node, parent, draft } = editing
+    const card = { idea: draft.idea.trim(), keywords: draft.keywords.map((k) => k.trim()).filter(Boolean).slice(0, 6), summary: draft.summary.trim() }
+    if (!node && parent) {
+      const id = `c${Date.now().toString(36)}`
+      change((s) => ({ ...s, custom: [...s.custom, { id, parent, title: draft.title.trim() || card.idea || 'My card', ...card }] }))
+    } else if (node?.kind === 'custom') {
+      change((s) => ({ ...s, custom: s.custom.map((c) => (c.id === node.id ? { ...c, title: draft.title.trim() || c.title, ...card } : c)) }))
+    } else if (node) {
+      change((s) => ({ ...s, edits: { ...s.edits, [node.id]: { ...(node.kind === 'point' ? {} : { title: draft.title.trim() || node.title }), ...card } } }))
+    }
+    setEditing(null)
+  }
+  const remove = (n: MapNode): void => {
+    if (n.kind === 'custom') change((s) => ({ ...s, custom: s.custom.filter((c) => c.id !== n.id && c.parent !== n.id) }))
+    else change((s) => ({ ...s, hidden: [...s.hidden, n.id] }))
+  }
+
+  /* ------------------------------------------------------------ export */
   const svgText = (): string => {
     const svg = svgRef.current!.cloneNode(true) as SVGSVGElement
-    const g = svg.querySelector('g[data-root]') as SVGGElement
-    g.setAttribute('transform', `translate(${-bounds.x} ${-bounds.y})`)
+    ;(svg.querySelector('g[data-root]') as SVGGElement).setAttribute('transform', `translate(${-bounds.x} ${-bounds.y})`)
     svg.setAttribute('viewBox', `0 0 ${bounds.w} ${bounds.h}`)
     svg.setAttribute('width', String(Math.round(bounds.w)))
     svg.setAttribute('height', String(Math.round(bounds.h)))
@@ -300,10 +483,8 @@ export default function MindMapView(props: Props): React.JSX.Element {
     svg.insertBefore(bg, svg.firstChild)
     return new XMLSerializer().serializeToString(svg)
   }
-  const base = props.name.replace(/\.[^.]+$/, '') || 'document'
-  const exportSvg = async (): Promise<void> => {
-    await props.saveImage(`${base} ${mode === 'map' ? 'mind map' : 'flowchart'}.svg`, new Blob([svgText()], { type: 'image/svg+xml' }))
-  }
+  const fileBase = `${props.name.replace(/\.[^.]+$/, '') || 'document'}${focusNode ? ` - ${focusNode.title.replace(/[\\/:*?"<>|]/g, '').slice(0, 60)}` : ''} mind map`
+  const exportSvg = async (): Promise<void> => props.saveImage(`${fileBase}.svg`, new Blob([svgText()], { type: 'image/svg+xml' }))
   const exportPng = async (): Promise<void> => {
     const url = URL.createObjectURL(new Blob([svgText()], { type: 'image/svg+xml' }))
     try {
@@ -314,91 +495,85 @@ export default function MindMapView(props: Props): React.JSX.Element {
         img.src = url
       })
       const scale = Math.min(2, 14000 / Math.max(bounds.w, bounds.h))
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(bounds.w * scale)
-      canvas.height = Math.round(bounds.h * scale)
-      const ctx = canvas.getContext('2d')!
+      const c = document.createElement('canvas')
+      c.width = Math.round(bounds.w * scale)
+      c.height = Math.round(bounds.h * scale)
+      const ctx = c.getContext('2d')!
       ctx.scale(scale, scale)
       ctx.drawImage(img, 0, 0)
-      const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'))
-      if (blob) await props.saveImage(`${base} ${mode === 'map' ? 'mind map' : 'flowchart'}.png`, blob)
+      const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'))
+      if (blob) await props.saveImage(`${fileBase}.png`, blob)
     } finally {
       URL.revokeObjectURL(url)
     }
   }
-  const doPrint = async (): Promise<void> => {
-    const landscape = bounds.w > bounds.h
-    await props.print(
-      `<!doctype html><html><head><meta charset="utf-8"><title>${base}</title><style>@page { size: ${landscape ? 'landscape' : 'portrait'}; margin: 10mm; } html,body{margin:0;background:#fff} svg{width:100%;height:auto;max-height:100vh}</style></head><body>${svgText()}</body></html>`
+  const doPrint = async (): Promise<void> =>
+    props.print(
+      `<!doctype html><html><head><meta charset="utf-8"><title>${fileBase}</title><style>@page { size: ${bounds.w > bounds.h ? 'landscape' : 'portrait'}; margin: 10mm; } html,body{margin:0;background:#fff} svg{width:100%;height:auto}</style></head><body>${svgText()}</body></html>`
     )
-  }
 
-  /* --------------------------------------------------------- pan and zoom */
-  const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null)
-  const onWheel = (e: React.WheelEvent): void => {
-    const host = hostRef.current!.getBoundingClientRect()
-    const px = e.clientX - host.left
-    const py = e.clientY - host.top
-    const k2 = Math.min(3, Math.max(0.1, view.k * Math.exp(-e.deltaY * 0.0015)))
-    setView({ k: k2, x: px - ((px - view.x) / view.k) * k2, y: py - ((py - view.y) / view.k) * k2 })
-  }
-  const zoomBy = (f: number): void => {
-    const host = hostRef.current!
-    const px = host.clientWidth / 2
-    const py = host.clientHeight / 2
-    const k2 = Math.min(3, Math.max(0.1, view.k * f))
-    setView({ k: k2, x: px - ((px - view.x) / view.k) * k2, y: py - ((py - view.y) / view.k) * k2 })
-  }
-
-  const toggle = (id: string): void =>
-    setFolded((f) => {
-      const n = new Set(f)
-      if (n.has(id)) n.delete(id)
-      else n.add(id)
-      return n
-    })
-
-  /* --------------------------------------------------------------- draw */
-  const edgePath = (a: Placed, b: Placed): string => {
-    if (mode === 'flow' && dir === 'right') {
-      const x1 = a.x + a.w / 2
-      const x2 = b.x - b.w / 2
-      const mx = x1 + 30
-      return `M${x1},${a.y} H${mx} V${b.y} H${x2}`
+  /* -------------------------------------------------------------- keys */
+  useEffect(() => {
+    const k = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      if (editing) setEditing(null)
+      else if (peek) setPeek(null)
+      else if (props.focus) props.onFocus(null)
+      else props.onClose()
     }
-    if (mode === 'flow') {
-      const y1 = a.y + a.h / 2
-      const y2 = b.y - b.h / 2
-      const my = (y1 + y2) / 2
-      return `M${a.x},${y1} V${my} H${b.x} V${y2}`
-    }
-    const x1 = a.x + (b.side * a.w) / 2
-    const x2 = b.x - (b.side * b.w) / 2
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [editing, peek, props])
+
+  /* -------------------------------------------------------- navigation */
+  const chapters = tree.children
+  const at = focusNode ? chapters.findIndex((c) => c.id === focusNode.id) : -1
+  const openMap = (n: MapNode): void => {
+    setPeek(null)
+    props.onFocus(n.id)
+  }
+
+  /* -------------------------------------------------------------- draw */
+  const edge = (a: Placed, b: Placed): string => {
+    const x1 = a.x + W
+    const y1 = a.y + Math.min(24, a.h / 2)
+    const x2 = b.x
+    const y2 = b.y + Math.min(24, b.h / 2)
     const mx = (x1 + x2) / 2
-    return `M${x1},${a.y} C${mx},${a.y} ${mx},${b.y} ${x2},${b.y}`
+    return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`
   }
+  const peekHtml = useMemo(() => (peek && peek.line >= 0 && peek.kind !== 'doc' ? renderMarkdown(passage(peek), { screen: true }) : ''), [peek]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="mindmap-view" data-mn-ignore role="dialog" aria-label="Mind map">
+    <div className="mindmap-view" data-mn-ignore role="region" aria-label="Mind map">
       <div className="mm-bar">
-        <span className="segmented mm-modes">
-          <button className={mode === 'map' ? 'on' : ''} onClick={() => setMode('map')}>
-            Mind map
+        <span className="mm-crumbs">
+          <button className={!focusNode ? 'on' : ''} onClick={() => props.onFocus(null)} title="The whole book: its chapters">
+            📖 Book overview
           </button>
-          <button className={mode === 'flow' ? 'on' : ''} onClick={() => setMode('flow')}>
-            Flowchart
+          {focusNode && (
+            <>
+              <span className="mm-sep">›</span>
+              <span className="mm-here" title={focusNode.title}>
+                {focusNode.title}
+              </span>
+              <button onClick={() => at > 0 && props.onFocus(chapters[at - 1].id)} disabled={at <= 0} title="Previous chapter">
+                ‹
+              </button>
+              <button onClick={() => at >= 0 && at < chapters.length - 1 && props.onFocus(chapters[at + 1].id)} disabled={at < 0 || at >= chapters.length - 1} title="Next chapter">
+                ›
+              </button>
+            </>
+          )}
+        </span>
+        <span className="segmented mm-kinds">
+          <button className={kind === 'map' ? 'on' : ''} onClick={() => setKind('map')} title="Mind map: the ideas and how they connect">
+            🧠 Mind map
+          </button>
+          <button className={kind === 'flow' ? 'on' : ''} onClick={() => (setKind('flow'), setView({ x: 430, y: 24, k: 1 }))} title="Flowchart: a process, step by step, with its decisions">
+            ⇢ Flowchart
           </button>
         </span>
-        {mode === 'flow' && (
-          <span className="segmented mm-modes" title="Which way the flowchart runs">
-            <button className={dir === 'down' ? 'on' : ''} onClick={() => setDir('down')} title="Top to bottom">
-              ↓
-            </button>
-            <button className={dir === 'right' ? 'on' : ''} onClick={() => setDir('right')} title="Left to right">
-              →
-            </button>
-          </span>
-        )}
         <span className="mm-group">
           <button onClick={() => zoomBy(1 / 1.25)} title="Zoom out">
             −
@@ -409,48 +584,47 @@ export default function MindMapView(props: Props): React.JSX.Element {
           <button onClick={fit} title="Fit the whole map in the window">
             Fit
           </button>
-          <button onClick={() => setFolded(new Set())} title="Open every branch">
-            Expand all
-          </button>
-          <button
-            onClick={() => {
-              const f = new Set<string>()
-              walk(tree, (n, d) => d >= 1 && n.children.length && f.add(n.id))
-              setFolded(f)
-            }}
-            title="Show only the main topics"
-          >
-            Collapse
-          </button>
         </span>
-        <label className="mm-check">
+        {kind === 'map' && (
+          <>
+        <label className="mm-check" title="Show each card's two-sentence summary">
           <input type="checkbox" checked={showSum} onChange={(e) => setShowSum(e.target.checked)} /> Summaries
         </label>
-        <button className="mm-ai" onClick={() => void aiSummaries()} disabled={!!progress} title={aiState.ready === false ? aiState.detail : 'Summaries written by the AI set up in the AI panel'}>
-          ✨ AI summaries
+        <button className="mm-ai" onClick={() => void aiCards()} disabled={!!progress} title="Rewrite the cards on this map with the AI set up in the AI panel">
+          ✨ AI cards
         </button>
+        {(state.hidden.length > 0 || Object.keys(state.moved).length > 0) && (
+          <button
+            onClick={() => change((s) => ({ ...s, hidden: [], moved: {} }))}
+            title="Bring back removed cards and put moved cards back in place (your own cards and edits stay)"
+          >
+            Reset layout
+          </button>
+        )}
+          </>
+        )}
         <span className="grow" />
         <span className="mm-group">
-          <button onClick={() => void exportPng()} title="Save the map as a PNG picture">
-            PNG
+          <button onClick={() => void exportPng()} title="Save this map as a PNG picture">
+            🖼 PNG
           </button>
-          <button onClick={() => void exportSvg()} title="Save the map as an SVG picture (sharp at any size)">
+          <button onClick={() => void exportSvg()} title="Save this map as an SVG picture (sharp at any size)">
             SVG
           </button>
-          <button onClick={() => void doPrint()} title="Print the map">
-            Print
+          <button onClick={() => void doPrint()} title="Print this map">
+            🖨 Print
           </button>
-          <button onClick={() => props.onInsert(mode === 'map' ? toMermaidMindmap(tree) : toMermaidFlowchart(tree))} title="Insert this map into the document as a Mermaid diagram">
+          <button onClick={() => props.onInsert(toMermaidMindmap(focusNode ?? tree))} title="Insert this map into the document as a Mermaid diagram">
             Insert into document
           </button>
         </span>
-        <button className="mm-close" onClick={props.onClose} title="Close (Esc)" aria-label="Close">
-          ✕
+        <button className="mm-close" onClick={props.onClose} title="Close the mind map (Esc or Alt+M)">
+          ✕ Close
         </button>
       </div>
-      {(banner || progress) && (
+      {(banner || progress || unsaved) && (
         <div className={`mm-banner${progress ? ' busy' : ''}`}>
-          {progress || banner}
+          <span>{progress || banner || 'Your changes to this map are kept until you close the app. Save the document to keep them with it.'}</span>
           {banner && !progress && (
             <button className="link" onClick={() => setBanner('')}>
               Dismiss
@@ -463,91 +637,130 @@ export default function MindMapView(props: Props): React.JSX.Element {
         ref={hostRef}
         onWheel={onWheel}
         onPointerDown={(e) => {
-          if ((e.target as Element).closest('[data-node]')) return
-          drag.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }
-          ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+          pan.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }
+          try {
+            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+          } catch {
+            /* no live pointer */
+          }
         }}
         onPointerMove={(e) => {
-          const d = drag.current
+          if (press.current) return onCardMove(e)
+          const d = pan.current
           if (d) setView((v) => ({ ...v, x: d.vx + e.clientX - d.x, y: d.vy + e.clientY - d.y }))
         }}
-        onPointerUp={() => (drag.current = null)}
+        onPointerUp={() => (pan.current = null)}
         style={{ background: colors.bg }}
       >
         <svg ref={svgRef} width="100%" height="100%" fontFamily={FONT}>
           <defs>
-            <marker id="mm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <marker id="mm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" fill={colors.muted} />
             </marker>
           </defs>
           <g data-root transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-            {edges.map(({ a, b }) => (
-              <path
-                key={`${a.n.id}-${b.n.id}`}
-                d={edgePath(a, b)}
-                fill="none"
-                stroke={mode === 'flow' ? colors.muted : b.color}
-                strokeOpacity={mode === 'flow' ? 0.8 : 0.85}
-                strokeWidth={mode === 'flow' ? 1.4 : Math.max(1.4, 4 - b.depth)}
-                markerEnd={mode === 'flow' ? 'url(#mm-arrow)' : undefined}
-              />
+            {flow && <FlowDrawing flow={flow} colors={colors} />}
+            {kind === 'map' && frames.map((f, i) => (
+              <g key={`f-${i}`}>
+                {f.parent && <path d={edge(f.parent, { x: f.x, y: f.y, h: 48 } as Placed)} fill="none" stroke={f.color} strokeOpacity={0.75} strokeWidth={2} />}
+                <rect x={f.x} y={f.y} width={f.w} height={f.h} rx={14} fill={f.color} fillOpacity={0.06} stroke={f.color} strokeOpacity={0.45} strokeDasharray="6 4" pointerEvents="none" />
+              </g>
             ))}
-            {placed.map((p) => {
+            {kind === 'map' && focusNode &&
+              placed.map((p) =>
+                p.parent && !frames.some((f) => f.ids.has(p.n.id)) ? (
+                  <path key={`e-${p.n.id}`} d={edge(p.parent, p)} fill="none" stroke={p.color} strokeOpacity={0.75} strokeWidth={Math.max(1.3, 3.2 - p.depth * 0.6)} />
+                ) : null
+              )}
+            {kind === 'map' && placed.map((p) => {
               const isRoot = p.depth === 0
-              const left = p.x - p.w / 2
-              const top = p.y - p.h / 2
               const lineH = isRoot ? 20 : 17
-              const tColor = isRoot ? colors.rootText : colors.text
-              const sColor = isRoot ? 'rgba(255,255,255,0.85)' : colors.muted
+              const point = p.n.kind === 'point'
+              const fill = isRoot ? colors.root : colors.card
+              const tColor = isRoot ? '#ffffff' : colors.text
+              const sColor = isRoot ? 'rgba(255,255,255,0.86)' : colors.muted
+              const yKeys = p.y + 12 + p.title.length * lineH + 13
+              const ySum = p.y + 12 + p.title.length * lineH + (p.keys ? 17 : 0) + 5
+              const showTools = hover === p.n.id && !drag
+              const childCount = (() => {
+                let c = -1
+                walk(p.n, (x) => x.kind !== 'point' && c++)
+                return c
+              })()
               return (
-                <g key={p.n.id} data-node className="mm-node">
+                <g
+                  key={p.n.id}
+                  className="mm-node"
+                  onPointerEnter={() => setHover(p.n.id)}
+                  onPointerLeave={() => setHover((h) => (h === p.n.id ? null : h))}
+                >
                   <rect
-                    x={left}
-                    y={top}
-                    width={p.w}
+                    x={p.x}
+                    y={p.y}
+                    width={W}
                     height={p.h}
-                    rx={10}
-                    fill={isRoot ? colors.root : colors.card}
+                    rx={point ? 8 : 11}
+                    fill={fill}
                     stroke={isRoot ? colors.root : p.color}
-                    strokeWidth={isRoot ? 0 : 1.6}
-                    style={{ cursor: p.n.slug || p.n.line >= 0 ? 'pointer' : 'default' }}
-                    onClick={() => (p.n.slug || p.n.line >= 0) && props.onJump({ slug: p.n.slug, line: p.n.line })}
+                    strokeWidth={isRoot ? 0 : point ? 1 : 1.7}
+                    strokeDasharray={p.n.kind === 'custom' ? '5 3' : undefined}
+                    style={{ cursor: drag?.id === p.n.id ? 'grabbing' : 'pointer' }}
+                    onPointerDown={(e) => onCardDown(e, p.n)}
+                    onPointerMove={onCardMove}
+                    onPointerUp={() => onCardUp(p.n)}
+                    onDoubleClick={() => !isRoot && !focusNode && p.n.children.length && openMap(p.n)}
                   >
-                    <title>{p.n.line >= 0 ? 'Go to this part of the document' : p.n.title}</title>
+                    <title>Click to see this passage · drag to move{!focusNode && !isRoot ? ' · double-click to open its map' : ''}</title>
                   </rect>
-                  {!isRoot && <rect x={left} y={top + 8} width={4} height={p.h - 16} rx={2} fill={p.color} pointerEvents="none" />}
-                  <text x={left + 14} y={top + 9 + lineH * 0.8} fontSize={isRoot ? 16 : 13.5} fontWeight={700} fill={tColor} pointerEvents="none">
+                  {!isRoot && <rect x={p.x} y={p.y + 8} width={4} height={p.h - 16} rx={2} fill={p.color} pointerEvents="none" />}
+                  {p.badge && (
+                    <g pointerEvents="none">
+                      <circle cx={p.x + W - 16} cy={p.y + 16} r={10} fill={p.color} />
+                      <text x={p.x + W - 16} y={p.y + 20} textAnchor="middle" fontSize={11} fontWeight={700} fill="#fff">
+                        {p.badge}
+                      </text>
+                    </g>
+                  )}
+                  <text x={p.x + 14} y={p.y + 12 + lineH * 0.8} fontSize={isRoot ? 16 : point ? 13 : 14} fontWeight={point ? 600 : 700} fill={tColor} pointerEvents="none">
                     {p.title.map((l, i) => (
-                      <tspan key={i} x={left + 14} dy={i ? lineH : 0}>
+                      <tspan key={i} x={p.x + 14} dy={i ? lineH : 0}>
                         {l}
                       </tspan>
                     ))}
                   </text>
+                  {p.keys && (
+                    <text x={p.x + 14} y={yKeys} fontSize={11} fontWeight={600} fill={isRoot ? '#ffe2c4' : colors.key} pointerEvents="none">
+                      {p.keys}
+                    </text>
+                  )}
                   {p.sum.length > 0 && (
-                    <text x={left + 14} y={top + 9 + p.title.length * lineH + 6 + 11} fontSize={11.5} fill={sColor} pointerEvents="none">
+                    <text x={p.x + 14} y={ySum + 11} fontSize={11.5} fill={sColor} pointerEvents="none">
                       {p.sum.map((l, i) => (
-                        <tspan key={i} x={left + 14} dy={i ? 15 : 0}>
+                        <tspan key={i} x={p.x + 14} dy={i ? 15 : 0}>
                           {l}
                         </tspan>
                       ))}
                     </text>
                   )}
-                  {p.kids > 0 && (
-                    <g
-                      data-ui
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => toggle(p.n.id)}
-                      transform={
-                        mode === 'flow' && dir === 'down'
-                          ? `translate(${p.x} ${p.y + p.h / 2})`
-                          : `translate(${isRoot ? p.x + p.w / 2 : p.x + (p.side * p.w) / 2} ${p.y})`
-                      }
-                    >
-                      <circle r={9} fill={colors.card} stroke={isRoot ? colors.root : p.color} strokeWidth={1.5} />
-                      <text textAnchor="middle" dy={4} fontSize={p.folded ? 10 : 13} fill={colors.text}>
-                        {p.folded ? p.kids : '−'}
-                      </text>
-                      <title>{p.folded ? `Show ${p.kids} sub-topic${p.kids === 1 ? '' : 's'}` : 'Fold this branch'}</title>
+                  {/* Hover tools: open its map (overview), add a card, edit, remove. */}
+                  {showTools && (
+                    <g data-ui transform={`translate(${p.x + W - (p.badge ? 30 : 4)} ${p.y - 13})`}>
+                      {[
+                        ...(!focusNode && !isRoot && p.n.children.length ? [{ k: 'map', label: '⤢', tip: `Open the map of this chapter (${childCount} topics)`, fn: () => openMap(p.n) }] : []),
+                        { k: 'add', label: '＋', tip: 'Add your own card under this one', fn: () => openEdit(null, p.n.id) },
+                        { k: 'edit', label: '✎', tip: 'Edit this card', fn: () => openEdit(p.n) },
+                        ...(!isRoot ? [{ k: 'del', label: '✕', tip: p.n.kind === 'custom' ? 'Delete your card' : 'Remove this card from the map (the document is not changed)', fn: () => remove(p.n) }] : [])
+                      ]
+                        .reverse()
+                        .map((b, i) => (
+                          <g key={b.k} transform={`translate(${-i * 26 - 12} 0)`} style={{ cursor: 'pointer' }} onPointerDown={(e) => e.stopPropagation()} onClick={b.fn}>
+                            <circle r={11} cx={0} cy={0} fill={colors.card} stroke={p.color} strokeWidth={1.4} />
+                            <text textAnchor="middle" dy={4} fontSize={12} fill={colors.text}>
+                              {b.label}
+                            </text>
+                            <title>{b.tip}</title>
+                          </g>
+                        ))}
                     </g>
                   )}
                 </g>
@@ -555,11 +768,190 @@ export default function MindMapView(props: Props): React.JSX.Element {
             })}
           </g>
         </svg>
-        {total <= 1 && <div className="mm-empty">This document has no headings yet. Add some (Insert → Heading) and they become the topics of the map.</div>}
+        {kind === 'flow' && (
+          <div className="mm-flow-list" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="mm-flow-head">Processes {focusNode ? 'in this chapter' : 'in this document'}</div>
+            {processes.map((p, i) => (
+              <button key={`${p.line}-${i}`} className={i === flowAt ? 'on' : ''} onClick={() => setFlowAt(i)} title={p.steps.join(' → ')}>
+                {p.title} <span className="muted">· {p.steps.length} steps</span>
+              </button>
+            ))}
+            {!processes.length && <p className="muted">No step-by-step process (numbered steps) here. Flowcharts show processes; the ideas of this part are in the mind map.</p>}
+            <button className="mm-ai" onClick={() => void aiSteps()} disabled={!!progress} title="Have the AI write this part's main process as steps">
+              ✨ Make one with AI
+            </button>
+          </div>
+        )}
+        {kind === 'map' && placed.length <= 1 && <div className="mm-empty">This document has no headings yet. Add some (Insert → Heading) and they become the cards of the map.</div>}
       </div>
       <div className="mm-foot">
-        {total - 1} topic{total === 2 ? '' : 's'} · Wheel to zoom · Drag to move · Click a topic to go to it · Esc to close
+        {kind === 'flow'
+          ? 'Flowchart: Start → steps → End; diamonds are decisions (Yes continues down, No goes to the side) · wheel to zoom · drag to move'
+          : focusNode
+          ? 'Click a card to see its passage · drag a card to move it (its branch moves too) · hover a card to add, edit or remove · Esc: back to the book'
+          : 'Chapters in reading order · click a card to see it · ⤢ or double-click opens the chapter’s own map · drag to arrange · Alt+M or Esc closes'}
       </div>
+
+      {peek && (
+        <div className="modal-backdrop" onMouseDown={() => setPeek(null)}>
+          <div className="modal mm-peek" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-label={peek.title}>
+            <h3>{peek.kind === 'point' ? peek.card.idea : peek.title}</h3>
+            <div className="mm-peek-card">
+              {peek.card.keywords.length > 0 && <div className="mm-peek-keys">{peek.card.keywords.map((k) => `#${k}`).join('  ')}</div>}
+              {peek.kind !== 'point' && peek.card.idea && <div className="mm-peek-idea">{peek.card.idea}</div>}
+              {peek.card.summary && <div className="mm-peek-sum">{peek.card.summary}</div>}
+              <div className="mm-peek-src">{peek.source === 'ai' ? 'Card written by AI' : peek.source === 'you' ? 'Your card' : 'Quick offline card'}</div>
+            </div>
+            {peekHtml ? <div className="markdown-body mm-peek-text" dangerouslySetInnerHTML={{ __html: peekHtml }} /> : <p className="muted">This is your own card; it has no passage in the document.</p>}
+            <div className="modal-actions">
+              {!focusNode && peek.kind !== 'doc' && peek.children.length > 0 && (
+                <button onClick={() => openMap(peek)}>⤢ Open its mind map</button>
+              )}
+              {focusNode && peek.kind === 'heading' && peek.id !== focusNode.id && peek.children.some((c) => c.kind !== 'point') && (
+                <button onClick={() => openMap(peek)}>⤢ Map of this topic</button>
+              )}
+              <button
+                onClick={() => {
+                  const n = peek
+                  setPeek(null)
+                  openEdit(n)
+                }}
+              >
+                ✎ Edit card
+              </button>
+              {peek.line >= 0 && (
+                <button
+                  onClick={() => {
+                    const n = peek
+                    setPeek(null)
+                    props.onShowInDocument({ slug: n.slug, line: n.line })
+                  }}
+                >
+                  Show in document
+                </button>
+              )}
+              <button className="primary" onClick={() => setPeek(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editing && (
+        <div className="modal-backdrop" onMouseDown={() => setEditing(null)}>
+          <div className="modal mm-edit" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-label="Edit card">
+            <h3>{editing.node ? 'Edit card' : 'New card'}</h3>
+            {(!editing.node || editing.node.kind !== 'point') && (
+              <label>
+                <span>Title</span>
+                <input autoFocus value={editing.draft.title} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, title: e.target.value } })} />
+              </label>
+            )}
+            <label>
+              <span>Key idea (one short line)</span>
+              <input
+                autoFocus={editing.node?.kind === 'point'}
+                value={editing.draft.idea}
+                onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, idea: e.target.value } })}
+              />
+            </label>
+            <label>
+              <span>Keywords (separated by commas)</span>
+              <input
+                value={editing.draft.keywords.join(', ')}
+                onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, keywords: e.target.value.split(',') } })}
+              />
+            </label>
+            <label>
+              <span>Summary (about two sentences)</span>
+              <textarea rows={4} value={editing.draft.summary} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, summary: e.target.value } })} />
+            </label>
+            <div className="modal-actions">
+              {editing.node && state.edits[editing.node.id] && (
+                <button
+                  onClick={() => {
+                    const id = editing.node!.id
+                    change((s) => {
+                      const edits = { ...s.edits }
+                      delete edits[id]
+                      return { ...s, edits }
+                    })
+                    setEditing(null)
+                  }}
+                >
+                  Restore original
+                </button>
+              )}
+              <span className="grow" />
+              <button onClick={() => setEditing(null)}>Cancel</button>
+              <button className="primary" onClick={saveEdit}>
+                {editing.node ? 'Save' : 'Add card'}
+              </button>
+            </div>
+            <p className="muted small">Changes are kept with the map, beside the document; the document itself is not changed.</p>
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+/** Draws a laid-out flowchart: pills for Start and End, boxes for steps, diamonds for decisions. */
+function FlowDrawing({ flow, colors }: { flow: ReturnType<typeof flowLayout>; colors: { card: string; text: string; muted: string; root: string } }): React.JSX.Element {
+  const by = new Map(flow.nodes.map((n) => [n.id, n]))
+  const ACC = '#4C9BE8'
+  const DEC = '#F28C38'
+  const edgePath = (a: FlowLaid, b: FlowLaid): string => {
+    if (a.col === b.col) return `M${a.cx},${a.cy + a.h / 2} L${b.cx},${b.cy - b.h / 2}`
+    // The "No" path: out of the diamond's side, then back into the main path below.
+    if (b.col > a.col) return `M${a.cx + a.w / 2},${a.cy} H${b.cx - b.w / 2}`
+    return `M${a.cx},${a.cy + a.h / 2} V${b.cy} H${b.cx + b.w / 2}`
+  }
+  return (
+    <g>
+      {flow.edges.map((e, i) => {
+        const a = by.get(e.from)!
+        const b = by.get(e.to)!
+        const lx = e.label === 'No' ? a.cx + a.w / 2 + 14 : a.cx + 10
+        const ly = e.label === 'No' ? a.cy - 6 : a.cy + a.h / 2 + 16
+        return (
+          <g key={i}>
+            <path d={edgePath(a, b)} fill="none" stroke={colors.muted} strokeWidth={1.6} markerEnd="url(#mm-arrow)" />
+            {e.label && (
+              <text x={lx} y={ly} fontSize={12} fontWeight={700} fill={e.label === 'Yes' ? '#4FB487' : '#E2678C'}>
+                {e.label}
+              </text>
+            )}
+          </g>
+        )
+      })}
+      {flow.nodes.map((n: FlowNode & { lines: string[]; w: number; h: number; cx: number; cy: number }) => {
+        const left = n.cx - n.w / 2
+        const top = n.cy - n.h / 2
+        const shape =
+          n.kind === 'decision' ? (
+            <polygon points={`${n.cx},${top} ${n.cx + n.w / 2},${n.cy} ${n.cx},${top + n.h} ${left},${n.cy}`} fill={colors.card} stroke={DEC} strokeWidth={2} />
+          ) : n.kind === 'step' ? (
+            <rect x={left} y={top} width={n.w} height={n.h} rx={8} fill={colors.card} stroke={ACC} strokeWidth={1.8} />
+          ) : (
+            <rect x={left} y={top} width={n.w} height={n.h} rx={n.h / 2} fill={colors.root} />
+          )
+        const lineH = n.kind === 'decision' ? 16 : 17
+        const y0 = n.cy - ((n.lines.length - 1) * lineH) / 2 + 4
+        return (
+          <g key={n.id}>
+            {shape}
+            <text textAnchor="middle" fontSize={n.kind === 'decision' ? 12.5 : 13.5} fontWeight={n.kind === 'step' ? 500 : 700} fill={n.kind === 'start' || n.kind === 'end' ? '#fff' : colors.text}>
+              {n.lines.map((l, i) => (
+                <tspan key={i} x={n.cx} y={y0 + i * lineH}>
+                  {l}
+                </tspan>
+              ))}
+            </text>
+          </g>
+        )
+      })}
+    </g>
   )
 }

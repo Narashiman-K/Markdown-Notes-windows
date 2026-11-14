@@ -11,6 +11,8 @@ interface Props {
   dictationOpen?: boolean
   /** The read-aloud bar is open. */
   readOpen?: boolean
+  /** The mind map is open. */
+  mindOpen?: boolean
   /**
    * Scanned pages' own pictures: 'none' when the document keeps none, and the
    * button is not shown; otherwise whether they are showing.
@@ -95,6 +97,7 @@ export default function Toolbar(props: Props): React.JSX.Element {
         {btn('view:sidebar:outline', '☰', 'Outline (Ctrl+Shift+O)', sidebar === 'outline' ? 'on' : '')}
         {btn('view:sidebar:comments', '💬', 'Annotations (Ctrl+Shift+C)', sidebar === 'comments' ? 'on' : '')}
         {btn('edit:find', '🔍', 'Find (Ctrl+F)')}
+        {btn('view:mindmap', '🧠', props.mindOpen ? 'Close the mind map (Alt+M)' : 'Mind map of this document, for revision (Alt+M)', props.mindOpen ? 'on' : '')}
         {btn('ai:toggle', '✦', 'Ask your documents (Ctrl+Shift+A)', aiOpen ? 'on' : '')}
       </div>
 
