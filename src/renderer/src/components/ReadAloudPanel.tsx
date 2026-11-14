@@ -21,6 +21,7 @@ import {
   type StyleId
 } from '../lib/speech/readAloud'
 import { NaturalVoice, NATURAL_VOICES, NATURAL_MODEL_MB, NATURAL_VOICES_READY } from '../lib/speech/naturalVoice'
+import { AudiobookPlayer, parseSidecar } from '../lib/speech/audiobook'
 
 interface Props {
   options: ReadOptions
@@ -28,6 +29,10 @@ interface Props {
   onClose: () => void
   /** Bumped by the app's shortcut to play or pause. */
   toggleSignal: number
+  /** The reader's own audiobook for this document (beside it, or linked), if any. */
+  audiobook?: { name: string; url: string; sidecar: string | null; linked: boolean } | null
+  onLinkAudiobook?: () => void
+  onUnlinkAudiobook?: () => void
 }
 
 const SLEEP_CHOICES: Array<[number, string]> = [
@@ -113,6 +118,47 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
 
   const set = (patch: Partial<ReadOptions>): void => props.onOptions({ ...options, ...patch })
 
+  /*
+   * The reader's own audiobook (Book2Audio's .m4b, or any .m4b / .mp3):
+   * offered first when there is one, since it is their own recording.
+   */
+  const book = useRef<AudiobookPlayer | null>(null)
+  const [bookChosen, setBookChosen] = useState(true)
+  const audiobook = props.audiobook ?? null
+  const useBook = !!audiobook && bookChosen
+  useEffect(() => {
+    book.current?.dispose()
+    book.current = audiobook?.url
+      ? new AudiobookPlayer(audiobook.url, parseSidecar(audiobook.sidecar), {
+          onState: setState,
+          onSentence: (i, n) => setPos({ i, n }),
+          onNote: setNote
+        })
+      : null
+    return () => {
+      book.current?.dispose()
+      book.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audiobook?.url, audiobook?.sidecar])
+  useEffect(() => {
+    book.current?.setRate(options.rate)
+    book.current?.setVolume(options.volume)
+  }, [options.rate, options.volume, audiobook?.url])
+
+  /** Starts the audiobook at a sentence of the page (matching it to the timing first). */
+  const startBook = (sentences: ReturnType<typeof collectSentences>, from: number, scroller: HTMLElement | null): void => {
+    const b = book.current
+    if (!b) return
+    player.current?.stop()
+    const { matched, total } = b.setDocument(sentences, scroller)
+    if (!audiobook?.sidecar) setNote(`Playing ${audiobook?.name}: no Book2Audio timing file (.b2a.json) beside it, so the text is not highlighted.`)
+    else if (!matched) setNote('The audiobook’s timing file does not match this document’s text, so the text is not highlighted.')
+    else if (matched < total * 0.8) setNote(`Highlighting matched ${matched} of ${total} paragraphs of the audiobook.`)
+    else setNote('')
+    void b.play(b.hasTiming ? from : undefined).catch(() => setNote('The audiobook could not be played.'))
+  }
+
   /** Gathers the document's sentences and starts from the selection or the screen. */
   const start = (): void => {
     const { root, scroller } = documentRoot()
@@ -139,10 +185,17 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
       setNote(options.highlightsOnly ? 'This document has no highlights to read.' : 'Nothing to read here.')
       return
     }
+    if (sleepTimer.current) window.clearTimeout(sleepTimer.current)
+    if (sleep > 0) sleepTimer.current = window.setTimeout(() => (player.current?.stop(), book.current?.stop()), sleep * 60_000)
+    if (useBook) {
+      // The audiobook is the whole book: start where the selection or screen is.
+      const all = collectSentences(root, options)
+      const at = all.findIndex((x) => x.segs[0]?.node === sentences[from]?.segs[0]?.node && x.text === sentences[from]?.text)
+      startBook(all, Math.max(0, at), scroller)
+      return
+    }
     player.current!.load(sentences, from, scroller)
     player.current!.play()
-    if (sleepTimer.current) window.clearTimeout(sleepTimer.current)
-    if (sleep > 0) sleepTimer.current = window.setTimeout(() => player.current?.stop(), sleep * 60_000)
   }
 
   // Double-click any sentence in the document to read from there on.
@@ -167,15 +220,26 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
       window.getSelection()?.removeAllRanges()
       natural.current?.unlock()
       setNote('')
+      if (useBook) return startBook(sentences, at, scroller)
       player.current!.load(sentences, at, scroller)
       player.current!.play()
     }
     document.addEventListener('dblclick', onDbl, true)
     return () => document.removeEventListener('dblclick', onDbl, true)
-  }, [options])
+  }, [options, useBook])
 
   const playPause = (): void => {
     const p = player.current!
+    // A remembered audiobook the browser needs permission for again: the
+    // press is what lets it ask.
+    if (useBook && !audiobook?.url) return props.onLinkAudiobook?.()
+    if (useBook && book.current) {
+      const a = book.current.audio
+      if (state === 'playing') book.current.pause()
+      else if (state === 'paused') void a.play()
+      else start()
+      return
+    }
     // Sound may only start from a press, so wake the audio now, not when the
     // first sentence is ready a few seconds later.
     if (state !== 'playing') natural.current?.unlock()
@@ -208,16 +272,16 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
     <div className="read-panel" data-mn-ignore role="region" aria-label="Read aloud">
       <div className="dict-row">
         <div className="read-transport">
-          <button className="read-btn" onClick={() => player.current?.prev()} disabled={state === 'idle'} title="Previous sentence">
+          <button className="read-btn" onClick={() => (useBook ? book.current?.step(-1) : player.current?.prev())} disabled={state === 'idle'} title="Previous sentence">
             ⏮
           </button>
           <button className={`read-play${state === 'playing' ? ' on' : ''}`} onClick={playPause} title={state === 'playing' ? 'Pause' : 'Read aloud'}>
             {state === 'playing' ? '⏸' : '▶'}
           </button>
-          <button className="read-btn" onClick={() => player.current?.next()} disabled={state === 'idle'} title="Next sentence">
+          <button className="read-btn" onClick={() => (useBook ? book.current?.step(1) : player.current?.next())} disabled={state === 'idle'} title="Next sentence">
             ⏭
           </button>
-          <button className="read-btn" onClick={() => player.current?.stop()} disabled={state === 'idle'} title="Stop">
+          <button className="read-btn" onClick={() => (useBook ? book.current?.stop() : player.current?.stop())} disabled={state === 'idle'} title="Stop">
             ⏹
           </button>
         </div>
@@ -239,11 +303,26 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
         </div>
         <label className="read-inline" title={options.engine === 'natural' ? 'Natural voice (English)' : 'Voice'}>
           <select
-            value={(options.engine === 'natural' || !voices.length) && !naturalOff ? options.naturalVoice : 'system'}
-            onChange={(e) =>
-              e.target.value === 'system' ? set({ engine: 'system' }) : set({ engine: 'natural', naturalVoice: e.target.value })
-            }
+            value={useBook ? '__book' : (options.engine === 'natural' || !voices.length) && !naturalOff ? options.naturalVoice : 'system'}
+            onChange={(e) => {
+              const v = e.target.value
+              if (v === '__link') return props.onLinkAudiobook?.()
+              if (v === '__unlink') return props.onUnlinkAudiobook?.()
+              if (state !== 'idle') (useBook ? book.current?.stop() : player.current?.stop())
+              if (v === '__book') return setBookChosen(true)
+              setBookChosen(false)
+              if (v === 'system') set({ engine: 'system' })
+              else set({ engine: 'natural', naturalVoice: v })
+            }}
           >
+            {audiobook && (
+              <optgroup label="Your audiobook">
+                <option value="__book">
+                  🎧 {audiobook.name}
+                  {audiobook.url ? '' : ' (press ▶ to allow)'}
+                </option>
+              </optgroup>
+            )}
             {!naturalOff && (
               <>
                 <optgroup label="Natural voices (English)">
@@ -267,6 +346,12 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
               <option value="system" disabled>
                 Natural voices are not available on this computer
               </option>
+            )}
+            {props.onLinkAudiobook && (
+              <optgroup label="Audiobook">
+                <option value="__link">{audiobook ? 'Link a different audiobook…' : '🎧 Link an audiobook (.m4b / .mp3)…'}</option>
+                {audiobook?.linked && <option value="__unlink">Unlink this audiobook</option>}
+              </optgroup>
             )}
           </select>
         </label>

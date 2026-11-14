@@ -1,7 +1,9 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, nativeTheme, protocol, net, session, type IpcMainInvokeEvent } from 'electron'
 import { join, basename, dirname, extname, isAbsolute, normalize, sep } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
-import { promises as fsp, watch as fsWatch, existsSync, rmSync, type FSWatcher } from 'node:fs'
+import { promises as fsp, watch as fsWatch, existsSync, rmSync, createReadStream, type FSWatcher } from 'node:fs'
+import { Readable } from 'node:stream'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { buildMenu } from './menu'
@@ -76,6 +78,8 @@ const READABLE_EXTS = TEXT_EXTS
  */
 protocol.registerSchemesAsPrivileged([
   { scheme: 'mn-local', privileges: { standard: true, secure: true, stream: true } },
+  // Audiobooks for read aloud (registerAudioProtocol): streamed, so seeking works.
+  { scheme: 'mn-audio', privileges: { standard: true, secure: true, stream: true } },
   // The app's own pages (see registerAppProtocol). Fetch, because pdf.js,
   // Tesseract and the spreadsheet worker load their files with it.
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, codeCache: true } }
@@ -107,6 +111,68 @@ function registerLocalImageProtocol(): void {
       return new Response('Not found.', { status: 404 })
     }
   })
+}
+
+/*
+ * `mn-audio:` — an audiobook read aloud plays: a `.m4b`, `.m4a` or `.mp3`
+ * beside the document, or one the user linked to it. Only files the main
+ * process has handed out a token for are served (audiobook:find / link), so
+ * the page cannot ask for any other file. Byte ranges are honoured, which is
+ * what lets the player jump to any point of a long book.
+ */
+const audioFiles = new Map<string, string>()
+const AUDIO_TYPES: Record<string, string> = { m4b: 'audio/mp4', m4a: 'audio/mp4', mp4: 'audio/mp4', mp3: 'audio/mpeg' }
+
+function audioToken(path: string): string {
+  for (const [k, v] of audioFiles) if (v === path) return k
+  const id = randomUUID()
+  audioFiles.set(id, path)
+  return id
+}
+
+function registerAudioProtocol(): void {
+  protocol.handle('mn-audio', async (request) => {
+    try {
+      const path = audioFiles.get(new URL(request.url).searchParams.get('id') ?? '')
+      if (!path) return new Response('Not found.', { status: 404 })
+      const size = (await fsp.stat(path)).size
+      const type = AUDIO_TYPES[extOf(path)] ?? 'application/octet-stream'
+      const m = /bytes=(\d*)-(\d*)/.exec(request.headers.get('range') ?? '')
+      if (m && size > 0) {
+        const start = m[1] ? Math.min(Number(m[1]), size - 1) : Math.max(0, size - Number(m[2] || 0))
+        const end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1
+        const body = Readable.toWeb(createReadStream(path, { start, end })) as unknown as ReadableStream
+        return new Response(body, {
+          status: 206,
+          headers: { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': String(end - start + 1) }
+        })
+      }
+      const body = Readable.toWeb(createReadStream(path)) as unknown as ReadableStream
+      return new Response(body, { status: 200, headers: { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': String(size) } })
+    } catch {
+      return new Response('Not found.', { status: 404 })
+    }
+  })
+}
+
+/** The audiobook for a document: linked by hand, or same name beside it; and its Book2Audio timing file. */
+async function audiobookFor(docPath: string): Promise<{ name: string; url: string; sidecar: string | null; linked: boolean } | null> {
+  const linked = getSettings().audiobooks?.[docPath]
+  let audio = linked && existsSync(linked) ? linked : null
+  if (!audio && docPath && existsSync(docPath)) {
+    const stem = join(dirname(docPath), basename(docPath).replace(/\.[^.]*$/, ''))
+    audio = ['.m4b', '.m4a', '.mp3'].map((e) => stem + e).find((p) => existsSync(p)) ?? null
+  }
+  if (!audio) return null
+  // Book2Audio writes "<book>.b2a.json" beside its .m4b: the time of every paragraph and sentence.
+  const side = join(dirname(audio), `${basename(audio).replace(/\.[^.]*$/, '')}.b2a.json`)
+  let sidecar: string | null = null
+  try {
+    if (existsSync(side) && (await fsp.stat(side)).size < 60 * 1024 * 1024) sidecar = await fsp.readFile(side, 'utf8')
+  } catch {
+    sidecar = null
+  }
+  return { name: basename(audio), url: `mn-audio://book/?id=${audioToken(audio)}`, sidecar, linked: !!(linked && audio === linked) }
 }
 
 /** Locates the app icon in both the development tree and a packaged build. */
@@ -828,6 +894,26 @@ function registerIpc(): void {
     return { ok: true }
   })
 
+  handle('audiobook:find', async (_e, docPath: string) => (typeof docPath === 'string' && docPath ? audiobookFor(docPath) : null))
+  handle('audiobook:link', async (_e, docPath: string) => {
+    if (typeof docPath !== 'string' || !docPath) return { ok: false, error: 'Save the document first, so the audiobook can be linked to it.' }
+    const r = await dialog.showOpenDialog(currentWindow()!, {
+      title: 'Link an audiobook to this document',
+      defaultPath: dirname(docPath),
+      properties: ['openFile'],
+      filters: [{ name: 'Audiobooks', extensions: ['m4b', 'm4a', 'mp3'] }]
+    })
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+    setSettings({ audiobooks: { ...(getSettings().audiobooks ?? {}), [docPath]: r.filePaths[0] } })
+    return { ok: true, book: await audiobookFor(docPath) }
+  })
+  handle('audiobook:unlink', async (_e, docPath: string) => {
+    const all = { ...(getSettings().audiobooks ?? {}) }
+    delete all[docPath]
+    setSettings({ audiobooks: all })
+    return { ok: true, book: await audiobookFor(docPath) }
+  })
+
   handle('settings:get', () => {
     // Never hand raw credentials to the renderer; expose presence only.
     const s = getSettings()
@@ -1376,6 +1462,7 @@ if (!gotLock) {
     // so no tool trips over a Unicode path.
     if (!harness) app.setPath('userData', join(app.getPath('appData'), APP_ASCII_NAME))
     registerLocalImageProtocol()
+    registerAudioProtocol()
     registerAppProtocol()
     hardenSessions()
     registerIpc()

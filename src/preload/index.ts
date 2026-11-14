@@ -27,6 +27,12 @@ const api = {
   exportImage: (args: { bytes: Uint8Array; suggestedName: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string; error?: string }> =>
     ipcRenderer.invoke('file:exportImage', args),
   mindmapLoad: (docPath: string): Promise<string | null> => ipcRenderer.invoke('mindmap:load', docPath),
+  audiobookFind: (docPath: string): Promise<{ name: string; url: string; sidecar: string | null; linked: boolean } | null> =>
+    ipcRenderer.invoke('audiobook:find', docPath),
+  audiobookLink: (docPath: string): Promise<{ ok: boolean; canceled?: boolean; error?: string; book?: { name: string; url: string; sidecar: string | null; linked: boolean } | null }> =>
+    ipcRenderer.invoke('audiobook:link', docPath),
+  audiobookUnlink: (docPath: string): Promise<{ ok: boolean; book?: { name: string; url: string; sidecar: string | null; linked: boolean } | null }> =>
+    ipcRenderer.invoke('audiobook:unlink', docPath),
   mindmapSave: (args: { docPath: string; json: string }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('mindmap:save', args),
 
   findStart: (args: { text: string; forward?: boolean; findNext?: boolean }) => ipcRenderer.invoke('find:start', args),

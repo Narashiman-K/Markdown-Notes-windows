@@ -196,6 +196,9 @@ export default function App(): React.JSX.Element {
   const [dictationOpen, setDictationOpen] = useState(false)
   const [readOpen, setReadOpen] = useState(false)
   const [mindOpen, setMindOpen] = useState(false)
+  // The reader's own audiobook for this document: same name beside it, or linked.
+  type Audiobook = { name: string; url: string; sidecar: string | null; linked: boolean }
+  const [audiobook, setAudiobook] = useState<Audiobook | null>(null)
   // The chapter map open in it (null: the book overview), and whether the
   // reader left it to look at the document (then a button leads back).
   const [mindFocus, setMindFocus] = useState<string | null>(null)
@@ -535,6 +538,17 @@ export default function App(): React.JSX.Element {
     if (fresh !== content) setContent(fresh)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode])
+
+  // Look for an audiobook whenever a different file is open.
+  useEffect(() => {
+    setAudiobook(null)
+    if (!filePath) return
+    let live = true
+    void window.api.audiobookFind(filePath).then((b) => live && setAudiobook(b))
+    return () => {
+      live = false
+    }
+  }, [filePath])
 
   const loadDocument = useCallback((path: string | null, text: string) => {
     // The document being replaced was saved or knowingly discarded: its
@@ -1895,6 +1909,20 @@ export default function App(): React.JSX.Element {
             void window.api.setSettings({ readAloud: next })
           }}
           onClose={() => setReadOpen(false)}
+          audiobook={audiobook}
+          onLinkAudiobook={async () => {
+            if (!filePath) return flash('Save the document first, so an audiobook can be linked to it.')
+            const r = await window.api.audiobookLink(filePath)
+            if (r.ok) {
+              setAudiobook(r.book ?? null)
+              flash(`Linked ${r.book?.name ?? 'the audiobook'}${r.book && !r.book.sidecar ? ' (no Book2Audio timing file beside it, so it plays without highlighting)' : ''}.`)
+            } else if (r.error) flash(r.error)
+          }}
+          onUnlinkAudiobook={async () => {
+            if (!filePath) return
+            const r = await window.api.audiobookUnlink(filePath)
+            setAudiobook(r.book ?? null)
+          }}
         />
       )}
 

@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 
 export interface Settings {
+  /** Audiobooks linked to documents by hand: document path → audio path. */
+  audiobooks?: Record<string, string>
   recentFiles: string[]
   theme: 'light' | 'dark' | 'system'
   zoom: number
