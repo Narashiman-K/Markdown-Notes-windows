@@ -832,21 +832,6 @@ export default function App(): React.JSX.Element {
     ed.applyEdit({ text: next, selectionStart: at, selectionEnd: at })
   }, [])
 
-  // Is the editor's cursor inside a table? Then a chip offers the table editor.
-  const cursorInTable = useMemo(() => {
-    if (mode !== 'edit') return false
-    let at = 0
-    for (let i = 1; i < cursor.line; i++) {
-      const nl = content.indexOf('\n', at)
-      if (nl < 0) return false
-      at = nl + 1
-    }
-    const end = content.indexOf('\n', at)
-    const lineText = content.slice(at, end < 0 ? undefined : end)
-    if (!lineText.includes('|')) return false
-    return !!tableAtLine(content, cursor.line - 1)
-  }, [mode, cursor.line, content])
-
   const editorEdit = useCallback(
     (fn: (text: string, from: number, to: number) => ReturnType<typeof wrapSelection>) => {
       if (mode !== 'edit' || !editorRef.current) {
@@ -1771,16 +1756,6 @@ export default function App(): React.JSX.Element {
                 }}
                 onTableChange={(line, change) => editTableInEditor(line, change)}
               />
-              {cursorInTable && (
-                <button
-                  className="editor-table-chip"
-                  title="Open the table editor for the table at the cursor"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => void actionRef.current('insert:table')}
-                >
-                  ✎ Edit table
-                </button>
-              )}
             </div>
           )}
         </section>

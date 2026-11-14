@@ -23,6 +23,7 @@ import { blockTints, DEFAULT_BLOCK_TINTS, type BlockKind } from '../lib/blockTin
 import type { ScrollSyncTarget } from '../lib/syncScroll'
 import { smartPaste } from '../lib/smartPaste'
 import { foldDataUrls } from '../lib/dataUrls'
+import { tableChip } from '../lib/tableChip'
 
 export interface EditorHandle {
   getSelection: () => { from: number; to: number }
@@ -154,6 +155,8 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
   const onCursorRef = useRef(onCursor)
   onChangeRef.current = onChange
   onCursorRef.current = onCursor
+  const onFormatRef = useRef(onFormat)
+  onFormatRef.current = onFormat
   const [selBar, setSelBar] = useState<{ x: number; y: number; flip: boolean } | null>(null)
 
   useEffect(() => {
@@ -195,6 +198,8 @@ const Editor = forwardRef<EditorHandle, Props>(function Editor(
       tintCompartment.of(blockTints(tintKindsRef.current, dark)),
       smartPaste(),
       foldDataUrls(),
+      // In a table: an Edit table button beside it.
+      tableChip(() => onFormatRef.current?.('insert:table')),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
