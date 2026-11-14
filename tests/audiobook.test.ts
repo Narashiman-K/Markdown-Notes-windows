@@ -74,6 +74,28 @@ describe('audiobook timing', () => {
     for (let i = 1; i < t.length; i++) expect(t[i].start).toBeGreaterThanOrEqual(t[i - 1].end - 1e-9)
   })
 
+  it('is not fooled by a table of contents that repeats the chapter titles', () => {
+    const page = doc([
+      ['Table of Contents'],
+      ['Chapter 1: Ugh, Small Talk'],
+      ['Chapter 2: First Impressions'],
+      ['Chapter 1: Ugh, Small Talk'],
+      ['Humans are a social species.', 'Connection matters.'],
+      ['Chapter 2: First Impressions'],
+      ['People decide in seconds.']
+    ])
+    const side = parseSidecar(
+      JSON.stringify({
+        chapters: [],
+        timeline: { 'c01-p000': [1, 8], 'c02-p000': [9, 14] },
+        texts: { 'c01-p000': 'Chapter 1: Ugh, Small Talk Humans are a social species.', 'c02-p000': 'Chapter 2: First Impressions People decide in seconds.' }
+      })
+    )!
+    const cues = alignCues(side, blocksOf(page))
+    // The real chapter headings (blocks 3 and 5), not the contents lines (1 and 2).
+    expect(cues.map((c) => c.block)).toEqual([3, 5])
+  })
+
   it('rejects a file that is not a timing file', () => {
     expect(parseSidecar('{"hello":1}')).toBeNull()
     expect(parseSidecar('nope')).toBeNull()

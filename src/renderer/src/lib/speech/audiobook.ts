@@ -98,11 +98,21 @@ export function alignCues(side: Sidecar, blocks: Block[]): Cue[] {
       const words = normText(side.texts[c.id] ?? '').split(' ').filter(Boolean)
       if (words.length < 2) continue
       const key = words.slice(0, 8).join(' ')
-      const short = words.slice(0, 4).join(' ')
       const from = Math.max(0, at - 1)
       for (let j = from; j < Math.min(blocks.length, from + 400); j++) {
         const b = blocks[j].norm
-        if (b.startsWith(key) || b.startsWith(short) || (key.length > 25 && b.includes(key))) {
+        if (!b) continue
+        let hit = b.startsWith(key) || (key.length > 25 && b.includes(key))
+        // A heading on its own line: the audiobook reads it straight into
+        // the paragraph after it, so that paragraph must carry on with the
+        // same words. A line of a table of contents, which repeats the
+        // chapter titles, is followed by another title and never matches.
+        if (!hit && key.startsWith(b) && b.split(' ').length >= 2) {
+          const rest = key.slice(b.length).trim().split(' ').slice(0, 3).join(' ')
+          const next = blocks[j + 1]?.norm ?? ''
+          hit = !rest || next.startsWith(rest)
+        }
+        if (hit) {
           c.block = j
           at = j + 1
           break
@@ -211,6 +221,11 @@ export function timeBlocks(side: Sidecar, blocks: Block[], sentences: ReadSenten
         return [a, at(acc / chars)] as [number, number]
       })
     }
+    // Ordinary narration is about 12–20 letters a second. A stretch that
+    // would need far more is a mismatch: better unhighlighted than racing.
+    const spoken = spans.reduce((t, [s, e]) => t + (e - s), 0)
+    const letters = sentIdx.reduce((t, k) => t + sentences[k].text.length, 0)
+    if (spoken > 0 && letters / spoken > 45) continue
     let n = 0
     for (let b = g.from; b <= g.to; b++) {
       const count = blocks[b].last - blocks[b].first + 1
@@ -264,6 +279,8 @@ export class AudiobookPlayer {
   ) {
     this.audio = new Audio(url)
     this.audio.preload = 'auto'
+    // Development builds only: lets the player be inspected from the console.
+    if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) (globalThis as unknown as { __mnBook?: AudiobookPlayer }).__mnBook = this
     this.audio.addEventListener('play', () => {
       this.events.onState('playing')
       this.loop()
