@@ -148,6 +148,14 @@ export function alignCues(side: Sidecar, blocks: Block[]): Cue[] {
   return cues
 }
 
+/** Seconds of pause after a sentence, and after a heading, in Book2Audio's narration. */
+const PAUSE_SENTENCE = 0.45
+const PAUSE_HEADING = 1.1
+/** How long an unconfirmed sentence start waits for its pause to be heard. */
+const HOLD = 0.6
+/** How far (seconds) an estimated sentence start may move to a real one. */
+const SNAP = 2.5
+
 /** A block of the page with the time of each of its sentences in the audiobook. */
 export interface Timed {
   block: number
@@ -202,10 +210,21 @@ export function timeBlocks(side: Sidecar, blocks: Block[], sentences: ReadSenten
     let times: Array<[number, number]>
     if (exact.length === sentIdx.length) times = exact
     else {
-      // Spread over the spoken time (gaps between paragraphs left out), by length.
+      // Spread over the spoken time (gaps between paragraphs left out) by
+      // length, allowing for the narrator's pause after each sentence
+      // (longer after a heading). Ignoring the pauses put the highlight a
+      // second or two ahead of the voice in long paragraphs.
       const total = spans.reduce((t, [s, e]) => t + (e - s), 0)
       const lens = sentIdx.map((k) => Math.max(1, sentences[k].text.length))
       const chars = lens.reduce((a, b) => a + b, 0)
+      const pauseOf = (k: number): number => (sentences[k].kind === 'heading' ? PAUSE_HEADING : PAUSE_SENTENCE)
+      let pauses = sentIdx.reduce((t, k) => t + pauseOf(k), 0)
+      // Never let the pauses take more than a third of the time.
+      const squeeze = pauses > total / 3 ? total / 3 / pauses : 1
+      pauses *= squeeze
+      const perChar = Math.max(0, total - pauses) / chars
+      const weights = sentIdx.map((k, i) => lens[i] * perChar + pauseOf(k) * squeeze)
+      const sum = weights.reduce((a, b) => a + b, 0) || 1
       const at = (f: number): number => {
         let need = f * total
         for (const [s, e] of spans) {
@@ -215,11 +234,29 @@ export function timeBlocks(side: Sidecar, blocks: Block[], sentences: ReadSenten
         return spans[spans.length - 1][1]
       }
       let acc = 0
-      times = lens.map((l) => {
-        const a = at(acc / chars)
-        acc += l
-        return [a, at(acc / chars)] as [number, number]
+      times = weights.map((w, i) => {
+        const a = at(acc / sum)
+        acc += w
+        // The sentence is spoken until its pause begins.
+        const end = at((acc - pauseOf(sentIdx[i]) * squeeze) / sum)
+        return [a, Math.max(a + 0.05, end)] as [number, number]
       })
+      // Book2Audio's own sentence times, when there are some but the page
+      // splits sentences differently: each estimated start moves to the
+      // nearest real sentence start close by.
+      if (exact.length) {
+        const starts = exact.map(([s0]) => s0)
+        let floor = -Infinity
+        times = times.map(([a, e], i) => {
+          if (i === 0) return [a, e] as [number, number]
+          let best = a
+          let gap = SNAP
+          for (const b of starts) if (b > floor && Math.abs(b - a) < gap) (gap = Math.abs(b - a)), (best = b)
+          floor = best
+          return [best, e] as [number, number]
+        })
+        for (let i = 0; i < times.length - 1; i++) times[i][1] = Math.min(times[i][1], times[i + 1][0])
+      }
     }
     // Ordinary narration is about 12–20 letters a second. A stretch that
     // would need far more is a mismatch: better unhighlighted than racing.
@@ -271,13 +308,28 @@ export class AudiobookPlayer {
   private scroller: HTMLElement | null = null
   private raf: number | null = null
   private lastKey = ''
+  /*
+   * Live pause detection: the narrator pauses before every sentence. Each
+   * time sound resumes after a pause, the sentence start estimated nearest to
+   * that moment is moved to it, so the highlight follows the real voice at
+   * any speed, even where the timing file only knows whole paragraphs.
+   */
+  private ctx: AudioContext | null = null
+  private analyser: AnalyserNode | null = null
+  private buf: Float32Array<ArrayBuffer> | null = null
+  private quietSince: number | null = null
+  /** Sentence starts confirmed by a heard pause: sentence index → media time. */
+  private heard = new Map<number, number>()
 
   constructor(
     url: string,
     private readonly side: Sidecar | null,
     private readonly events: AudiobookEvents
   ) {
-    this.audio = new Audio(url)
+    this.audio = new Audio()
+    // Needed to listen to the sound for pauses (the app's own audiobook files).
+    this.audio.crossOrigin = 'anonymous'
+    this.audio.src = url
     this.audio.preload = 'auto'
     // Development builds only: lets the player be inspected from the console.
     if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) (globalThis as unknown as { __mnBook?: AudiobookPlayer }).__mnBook = this
@@ -321,7 +373,67 @@ export class AudiobookPlayer {
     return t.sents[sentence - this.blocks[b].first]?.[0] ?? t.start
   }
 
+  /** Starts listening for pauses (must follow a click, like all sound). */
+  private listen(): void {
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') void this.ctx.resume()
+      return
+    }
+    try {
+      this.ctx = new AudioContext()
+      const src = this.ctx.createMediaElementSource(this.audio)
+      this.analyser = this.ctx.createAnalyser()
+      this.analyser.fftSize = 1024
+      this.buf = new Float32Array(new ArrayBuffer(this.analyser.fftSize * 4))
+      src.connect(this.analyser)
+      this.analyser.connect(this.ctx.destination)
+    } catch {
+      this.ctx = null
+      this.analyser = null
+    }
+  }
+
+  /** Watches the sound: when it comes back after a pause, a sentence starts there. */
+  private detectPause(t: number): void {
+    const a = this.analyser
+    const buf = this.buf
+    if (!a || !buf) return
+    a.getFloatTimeDomainData(buf)
+    let sum = 0
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
+    const rms = Math.sqrt(sum / buf.length)
+    if (rms < 0.012) {
+      if (this.quietSince === null) this.quietSince = t
+      return
+    }
+    const since = this.quietSince
+    this.quietSince = null
+    if (since === null || t - since < 0.22) return
+    // Sound is back after a real pause: the nearest estimated sentence start.
+    const c = this.timed[cueAt(this.timed, t + 1.5)]
+    if (!c) return
+    const near = (x: Timed): number[] => x.sents.map(([st], i) => this.blocks[x.block].first + i).filter((k) => {
+      const st = this.startOf(k)
+      return st !== null && Math.abs(st - t) < 1.6
+    })
+    const k = c ? near(c).concat(near(this.timed[cueAt(this.timed, t - 1.5)] ?? c)) : []
+    if (!k.length) return
+    const best = k.reduce((x, y) => (Math.abs((this.startOf(x) ?? 1e9) - t) <= Math.abs((this.startOf(y) ?? 1e9) - t) ? x : y))
+    this.heard.set(best, t)
+  }
+
+  /** A sentence's start: as heard, or as estimated. */
+  private startOf(k: number): number | null {
+    const h = this.heard.get(k)
+    if (h !== undefined) return h
+    const b = this.blocks.findIndex((x) => k >= x.first && k <= x.last)
+    const c = b >= 0 ? this.timed.find((x) => x.block === b) : undefined
+    return c ? c.sents[k - this.blocks[b].first][0] : null
+  }
+
   async play(fromSentence?: number): Promise<void> {
+    this.listen()
+    this.heard.clear()
     if (fromSentence !== undefined) {
       const t = this.timeOf(fromSentence)
       if (t !== null) this.audio.currentTime = Math.max(0, t - 0.05)
@@ -357,6 +469,9 @@ export class AudiobookPlayer {
   }
 
   dispose(): void {
+    void this.ctx?.close()
+    this.ctx = null
+    this.analyser = null
     this.audio.pause()
     this.audio.removeAttribute('src')
     this.audio.load()
@@ -385,14 +500,22 @@ export class AudiobookPlayer {
 
   private highlight(): void {
     const t = this.audio.currentTime
+    this.detectPause(t)
     const c = this.timed[cueAt(this.timed, t)]
     if (!c || t > c.end + 1.5) return
     const b = this.blocks[c.block]
     const times = c.sents
-    let i = times.findIndex(([, e]) => t < e)
-    if (i < 0) i = times.length - 1
+    // Each sentence starts where its pause was heard; one not heard yet
+    // waits a moment past its estimate for the pause to confirm it, so the
+    // highlight never runs ahead of the voice.
+    const listening = !!this.analyser
+    const starts = times.map(([s0], k) => this.heard.get(b.first + k) ?? (listening && k > 0 ? s0 + HOLD : s0))
+    if (starts[0] > t && listening) return
+    let i = 0
+    for (let k = 0; k < starts.length; k++) if (starts[k] <= t) i = k
     const s = this.sentences[b.first + i]
-    const [st, en] = times[i]
+    const st = starts[i]
+    const en = i + 1 < starts.length ? Math.max(st + 0.2, starts[i + 1] - PAUSE_SENTENCE) : times[i][1]
     // The word: by its share of the sentence's letters.
     const words = [...s.text.matchAll(/\S+/g)]
     const total = words.reduce((n, m) => n + m[0].length + 1, 0) || 1

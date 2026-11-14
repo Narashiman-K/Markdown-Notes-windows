@@ -292,7 +292,7 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
               : preparing
                 ? 'Preparing the voice…'
                 : state === 'idle'
-                  ? 'Press ▶ to read from the top of the screen, or double-click where to start.'
+                  ? 'Press ▶'
                   : `${state === 'paused' ? 'Paused · ' : ''}Sentence ${pos.i + 1} of ${pos.n}`}
           </span>
           {note && (
@@ -364,9 +364,12 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
             ))}
           </select>
         </label>
-        <label className="read-inline" title={`Speed ${(options.rate * style.rate).toFixed(2)}×`}>
+        <label className="read-inline read-speed" title="Speed (double-click a sentence to start there)">
           <span>Speed</span>
-          <input type="range" min={0.5} max={2.5} step={0.05} value={options.rate} onChange={(e) => set({ rate: Number(e.target.value) })} />
+          <span className="read-speed-box">
+            <span className="read-speed-value">{(useBook ? options.rate : options.rate * style.rate).toFixed(2)}×</span>
+            <input type="range" min={0.5} max={2.5} step={0.05} value={options.rate} onChange={(e) => set({ rate: Number(e.target.value) })} />
+          </span>
         </label>
         <button className="dict-summary" onClick={() => setMore((v) => !v)} title="Pitch, emotion, voice and more">
           More {more ? '▾' : '▸'}

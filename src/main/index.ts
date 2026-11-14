@@ -79,7 +79,7 @@ const READABLE_EXTS = TEXT_EXTS
 protocol.registerSchemesAsPrivileged([
   { scheme: 'mn-local', privileges: { standard: true, secure: true, stream: true } },
   // Audiobooks for read aloud (registerAudioProtocol): streamed, so seeking works.
-  { scheme: 'mn-audio', privileges: { standard: true, secure: true, stream: true } },
+  { scheme: 'mn-audio', privileges: { standard: true, secure: true, stream: true, corsEnabled: true } },
   // The app's own pages (see registerAppProtocol). Fetch, because pdf.js,
   // Tesseract and the spreadsheet worker load their files with it.
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, codeCache: true } }
@@ -144,11 +144,11 @@ function registerAudioProtocol(): void {
         const body = Readable.toWeb(createReadStream(path, { start, end })) as unknown as ReadableStream
         return new Response(body, {
           status: 206,
-          headers: { 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': String(end - start + 1) }
+          headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': type, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': String(end - start + 1) }
         })
       }
       const body = Readable.toWeb(createReadStream(path)) as unknown as ReadableStream
-      return new Response(body, { status: 200, headers: { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': String(size) } })
+      return new Response(body, { status: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': String(size) } })
     } catch {
       return new Response('Not found.', { status: 404 })
     }

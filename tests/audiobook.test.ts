@@ -68,7 +68,9 @@ describe('audiobook timing', () => {
     const t = timeBlocks(side, blocksOf(PAGE), PAGE)
     expect(t.map((x) => x.block)).toEqual([0, 1, 2, 3, 4, 5])
     expect(t[0].start).toBe(1)
-    expect(t[3].end).toBeCloseTo(14, 5)
+    // Ends where the narrator's pause begins, just before the chapter's end.
+    expect(t[3].end).toBeGreaterThan(13.3)
+    expect(t[3].end).toBeLessThanOrEqual(14)
     expect(t[4].start).toBe(15)
     // In order, without overlaps.
     for (let i = 1; i < t.length; i++) expect(t[i].start).toBeGreaterThanOrEqual(t[i - 1].end - 1e-9)

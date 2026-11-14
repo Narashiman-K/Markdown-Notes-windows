@@ -1798,3 +1798,5 @@ html[data-theme='dark'] { --backlit-halo: rgba(255, 150, 60, 0.26); }
 .mm-peek-links { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 10px; }
 .mm-edit select { padding: 7px 9px; border: 1px solid var(--chrome-border); border-radius: var(--radius); background: var(--bg); color: var(--fg); font: inherit; }
 .modal.mm-edit { max-height: 90vh; overflow: auto; }
+.read-speed-box { display: inline-flex; flex-direction: column; align-items: center; line-height: 1; }
+.read-speed-value { font-size: 10.5px; color: var(--muted); margin-bottom: 1px; }

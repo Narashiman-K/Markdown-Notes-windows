@@ -22,7 +22,7 @@ interface Props {
 }
 
 export default function Toolbar(props: Props): React.JSX.Element {
-  const { mode, readerOn, zoom, dirty, fileName, sidebar, aiOpen, onAction } = props
+  const { mode, readerOn, zoom, dirty, sidebar, aiOpen, onAction } = props
   const btn = (action: string, label: string, title: string, extra = ''): React.JSX.Element => (
     <button className={`tb ${extra}`} title={title} onClick={() => onAction(action)}>
       {label}
@@ -101,10 +101,7 @@ export default function Toolbar(props: Props): React.JSX.Element {
         {btn('ai:toggle', '✦', 'Ask your documents (Ctrl+Shift+A)', aiOpen ? 'on' : '')}
       </div>
 
-      <div className="tb-title" title={fileName}>
-        {dirty ? '• ' : ''}
-        {fileName}
-      </div>
+      {/* The file name is in the window's title bar, so it is not repeated here. */}
     </div>
   )
 }
