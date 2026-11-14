@@ -231,7 +231,11 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
                   ? 'Press ▶ to read from the top of the screen, or double-click where to start.'
                   : `${state === 'paused' ? 'Paused · ' : ''}Sentence ${pos.i + 1} of ${pos.n}`}
           </span>
-          {note && <span className="dict-note">{note}</span>}
+          {note && (
+            <span className="dict-note" title={note}>
+              {note}
+            </span>
+          )}
         </div>
         <label className="read-inline" title={options.engine === 'natural' ? 'Natural voice (English)' : 'Voice'}>
           <select

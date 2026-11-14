@@ -41,6 +41,12 @@ export interface NaturalEvents {
 
 type Pending = { resolve: (a: { samples: Float32Array; rate: number }) => void; reject: (e: Error) => void }
 
+/** An error meaning the graphics chip's connection was lost (it never comes back). */
+export function isGpuLost(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : String(e)
+  return /device (?:is |was )?lost|\[Device\] is lost|GPUBuffer|mapAsync|DXGI_ERROR|context lost/i.test(m)
+}
+
 export class NaturalVoice {
   private worker: Worker | null = null
   private ready: Promise<void> | null = null
@@ -130,7 +136,9 @@ export class NaturalVoice {
     return p
   }
 
-  private queue: Array<{ key: string; text: string; voice: string; speed: number } & Pending> = []
+  private queue: Array<{ key: string; text: string; voice: string; speed: number; tries?: number } & Pending> = []
+  /** Times the engine has been restarted after the graphics chip was reset. */
+  private restarts = 0
   private busy = false
 
   private pump(): void {
@@ -150,6 +158,18 @@ export class NaturalVoice {
             done()
           },
           reject: (e) => {
+            // The graphics chip was reset (sleep, a driver reset, too much
+            // load): its connection is gone for good, so start the engine
+            // again and make the same sentence once more, instead of giving
+            // up on the natural voice for the rest of the session.
+            if (isGpuLost(e) && (job.tries ?? 0) < 2 && this.restarts < 20) {
+              job.tries = (job.tries ?? 0) + 1
+              this.restarts++
+              this.restartEngine()
+              this.queue.unshift(job)
+              done()
+              return
+            }
             job.reject(e)
             done()
           }
@@ -162,6 +182,16 @@ export class NaturalVoice {
         this.busy = false
       }
     )
+  }
+
+  /** A fresh engine (worker and graphics connection); the model comes from the cache. */
+  private restartEngine(): void {
+    this.worker?.terminate()
+    this.worker = null
+    this.ready = null
+    // Requests go one at a time, so the only one waiting is the failed one,
+    // which is being asked again.
+    this.pending.clear()
   }
 
   /**
