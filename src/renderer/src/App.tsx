@@ -5,6 +5,7 @@ import Editor, { type EditorHandle } from './components/Editor'
 import Sidebar from './components/Sidebar'
 import FindBar from './components/FindBar'
 import NoteDialog from './components/NoteDialog'
+import MindMapView from './components/MindMapView'
 import TableEditor, { TableSizePicker } from './components/TableEditor'
 import { linesOf, newTable, parseTable, replaceLines, serializeTable, tableAtLine, type Table, type TableRange } from './lib/table'
 import AboutDialog from './components/AboutDialog'
@@ -194,6 +195,7 @@ export default function App(): React.JSX.Element {
   const [compareOpen, setCompareOpen] = useState(false)
   const [dictationOpen, setDictationOpen] = useState(false)
   const [readOpen, setReadOpen] = useState(false)
+  const [mindOpen, setMindOpen] = useState(false)
   // The table editor: picking a size for a new table, or editing one.
   const [tableDialog, setTableDialog] = useState<
     | { kind: 'size'; from: number; to: number }
@@ -976,6 +978,9 @@ export default function App(): React.JSX.Element {
           return
         case 'file:compare':
           setCompareOpen(true)
+          return
+        case 'view:mindmap':
+          setMindOpen(true)
           return
         case 'view:readAloud':
           // Reads the rendered page, so it needs View (or Reader) mode.
@@ -1971,6 +1976,62 @@ export default function App(): React.JSX.Element {
         />
       )}
 
+      {mindOpen && (
+        <MindMapView
+          source={content}
+          name={fileName}
+          dark={dark}
+          onClose={() => setMindOpen(false)}
+          onJump={({ slug, line }) => {
+            setMindOpen(false)
+            if (mode === 'edit' && editorRef.current && line >= 0) {
+              editorRef.current.gotoLine(line + 1)
+              return
+            }
+            setMode('view')
+            if (slug) window.setTimeout(() => previewRef.current?.scrollToSlug(slug), 30)
+          }}
+          onInsert={(mermaid) => {
+            setMindOpen(false)
+            const block = '```mermaid\n' + mermaid + '\n```'
+            if (mode === 'edit' && editorRef.current) {
+              const ed = editorRef.current
+              const { from, to } = ed.getSelection()
+              ed.applyEdit(insertBlock(ed.getValue(), from, to, block))
+            } else {
+              // After the title, so it opens the document.
+              const lines = content.split('\n')
+              const title = lines.findIndex((l) => /^#\s/.test(l))
+              lines.splice(title + 1, 0, '', block)
+              commitContent(lines.join('\n'), 'Insert mind map')
+            }
+            flash('Mind map inserted as a Mermaid diagram (it draws on GitHub, in Obsidian and other Mermaid-aware apps).')
+          }}
+          ai={{
+            status: async () => {
+              const s = await window.api.getSettings()
+              const provider = s?.aiProvider ?? 'ollama'
+              return window.api.aiStatus(provider)
+            },
+            ask: async (system, user) => {
+              const s = await window.api.getSettings()
+              const provider = (s?.aiProvider ?? 'ollama') as ProviderId
+              let model: string = s?.aiModel ?? ''
+              if (!model) model = (await window.api.aiModels(provider))?.models?.[0] ?? ''
+              return window.api.aiChat({ provider, model, system, messages: [{ role: 'user', content: user }], temperature: 0.2, maxTokens: 1200 })
+            }
+          }}
+          saveImage={async (name, data) => {
+            const r = await window.api.exportImage({ bytes: new Uint8Array(await data.arrayBuffer()), suggestedName: name })
+            if (r.ok) flash(`Saved ${r.filePath ?? name}`)
+            else if (r.error) flash(`Could not save the picture: ${r.error}`)
+          }}
+          print={async (html) => {
+            const r = await window.api.print({ html, title: `${fileName} mind map` })
+            if (!r.ok && r.error && !/cancel/i.test(r.error)) flash(`Print failed: ${r.error}`)
+          }}
+        />
+      )}
       {tableDialog?.kind === 'size' && (
         <TableSizePicker
           onCancel={() => setTableDialog(null)}

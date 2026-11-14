@@ -627,6 +627,27 @@ function registerIpc(): void {
     }
   })
 
+  // A picture made by the app (the mind map): PNG or SVG only, saved where the
+  // user picks. The bytes come from the page, so the size is capped.
+  handle('file:exportImage', async (_e, args: { bytes: Uint8Array; suggestedName: string }) => {
+    const ext = /\.svg$/i.test(args.suggestedName) ? 'svg' : 'png'
+    if (!(args.bytes instanceof Uint8Array) || args.bytes.byteLength > 40 * 1024 * 1024) return { ok: false, error: 'The picture is too large.' }
+    const r = await dialog.showSaveDialog(currentWindow()!, {
+      title: 'Save the picture',
+      defaultPath: inLastFolder(basename(args.suggestedName).replace(/\.[^.]*$/, '') + '.' + ext),
+      filters: [ext === 'svg' ? { name: 'SVG picture', extensions: ['svg'] } : { name: 'PNG picture', extensions: ['png'] }]
+    })
+    if (r.canceled || !r.filePath) return { ok: false, canceled: true }
+    const path = /\.(png|svg)$/i.test(r.filePath) ? r.filePath : `${r.filePath}.${ext}`
+    rememberFolder(path)
+    try {
+      await fsp.writeFile(path, Buffer.from(args.bytes))
+      return { ok: true, filePath: path }
+    } catch (err) {
+      return { ok: false, error: String((err as Error).message ?? err) }
+    }
+  })
+
   handle('dialog:pickAnnotations', async (_e, opts?: { folder?: string }) => {
     const r = await dialog.showOpenDialog(currentWindow()!, {
       title: 'Load annotations',

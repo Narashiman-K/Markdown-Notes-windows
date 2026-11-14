@@ -24,6 +24,8 @@ const api = {
   annotationsBeside: (filePath: string): Promise<{ name: string; content: string } | null> =>
     ipcRenderer.invoke('file:annotationsBeside', filePath),
   print: (args: { html: string; title?: string }) => ipcRenderer.invoke('file:print', args),
+  exportImage: (args: { bytes: Uint8Array; suggestedName: string }): Promise<{ ok: boolean; canceled?: boolean; filePath?: string; error?: string }> =>
+    ipcRenderer.invoke('file:exportImage', args),
 
   findStart: (args: { text: string; forward?: boolean; findNext?: boolean }) => ipcRenderer.invoke('find:start', args),
   findStop: () => ipcRenderer.invoke('find:stop'),

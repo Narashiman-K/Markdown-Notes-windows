@@ -719,6 +719,25 @@ export async function runSmoke(win: BrowserWindow, outDir: string): Promise<void
         15_000,
         '[]'
       )
+      // Mind map: opens from the View menu with the document's headings as
+      // topics, and closes with Esc.
+      win.webContents.send('menu:action', { action: 'view:mindmap' })
+      const mind = await jsWithTimeout<string>(
+        `(async () => {
+          const pause = (ms) => new Promise(r => setTimeout(r, ms));
+          for (let i = 0; i < 20 && !document.querySelector('.mindmap-view'); i++) await pause(100);
+          await pause(300);
+          const nodes = document.querySelectorAll('.mindmap-view .mm-node').length;
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+          await pause(200);
+          return JSON.stringify({ nodes, closed: !document.querySelector('.mindmap-view') });
+        })()`,
+        10_000,
+        '{}'
+      )
+      const mm = JSON.parse(mind) as { nodes?: number; closed?: boolean }
+      check('mind map opens with the headings as topics and closes', (mm.nodes ?? 0) > 1 && mm.closed === true, mind)
+
       check('read aloud and dictation bars toggle every time', toggles === JSON.stringify([true, false, true, false, true, false, true, false, true, false, true, false]), toggles)
     }
 
