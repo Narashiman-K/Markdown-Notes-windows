@@ -44,8 +44,21 @@ export interface MapNode {
   card: Card
   /** Where the card's text came from. */
   source: 'offline' | 'ai' | 'you'
+  /** The reader's own notes on the card, and a web link (Edit mind map). */
+  notes?: string
+  url?: string
   children: MapNode[]
 }
+
+/** A part of the document a card is linked to (Edit mind map → link). */
+export interface DocLink {
+  line: number
+  end: number
+  slug: string
+  label: string
+}
+
+export type CardEdit = Partial<Card> & { title?: string; notes?: string; url?: string; link?: DocLink | null }
 
 const plainTitle = (t: string): string =>
   t
@@ -323,8 +336,10 @@ export interface MapState {
   v: 1
   /** Card moved by hand: offset from where the layout puts it (moves its branch too). */
   moved: Record<string, { dx: number; dy: number }>
-  /** Card text changed by the reader. */
-  edits: Record<string, Partial<Card> & { title?: string }>
+  /** Card text changed by the reader, with notes, a web link and a document link. */
+  edits: Record<string, CardEdit>
+  /** Lines the reader drew between two cards. */
+  links: Array<{ from: string; to: string }>
   /** Cards the reader added. */
   custom: Array<{ id: string; parent: string; title: string } & Card>
   /** Cards the reader removed from the map (the document is untouched). */
@@ -333,7 +348,7 @@ export interface MapState {
   ai: Record<string, Card>
 }
 
-export const EMPTY_STATE: MapState = { v: 1, moved: {}, edits: {}, custom: [], hidden: [], ai: {} }
+export const EMPTY_STATE: MapState = { v: 1, moved: {}, edits: {}, links: [], custom: [], hidden: [], ai: {} }
 
 /** Reads a saved state, ignoring anything malformed. */
 export function readState(json: string | null | undefined): MapState {
@@ -344,6 +359,7 @@ export function readState(json: string | null | undefined): MapState {
       v: 1,
       moved: typeof s.moved === 'object' && s.moved ? s.moved : {},
       edits: typeof s.edits === 'object' && s.edits ? s.edits : {},
+      links: Array.isArray(s.links) ? s.links.filter((l) => l && typeof l.from === 'string' && typeof l.to === 'string') : [],
       custom: Array.isArray(s.custom) ? s.custom.filter((c) => c && typeof c.id === 'string' && typeof c.parent === 'string') : [],
       hidden: Array.isArray(s.hidden) ? s.hidden.filter((h) => typeof h === 'string') : [],
       ai: typeof s.ai === 'object' && s.ai ? s.ai : {}
@@ -387,10 +403,19 @@ export function applyState(root: MapNode, state: MapState): MapNode {
   walk(tree, (n) => {
     const e = state.edits[n.id]
     if (!e) return
+    const textChanged = e.idea !== undefined || e.keywords !== undefined || e.summary !== undefined || e.title !== undefined
     n.card = { idea: e.idea ?? n.card.idea, keywords: e.keywords ?? n.card.keywords, summary: e.summary ?? n.card.summary }
     if (e.title !== undefined) n.title = e.title
     else if (n.kind === 'point') n.title = n.card.idea
-    n.source = 'you'
+    if (textChanged) n.source = 'you'
+    if (e.notes) n.notes = e.notes
+    if (e.url) n.url = e.url
+    // A card linked to a part of the document shows that part.
+    if (e.link) {
+      n.line = e.link.line
+      n.end = e.link.end
+      if (n.kind === 'custom') n.slug = e.link.slug
+    }
   })
   return tree
 }

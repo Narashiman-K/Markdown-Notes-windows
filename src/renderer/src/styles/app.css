@@ -1790,3 +1790,11 @@ html[data-theme='dark'] { --backlit-halo: rgba(255, 150, 60, 0.26); }
 .mm-flow-list button { text-align: left; border: 1px solid var(--chrome-border); background: var(--bg); color: var(--fg); border-radius: 6px; padding: 6px 8px; cursor: pointer; font: inherit; }
 .mm-flow-list button.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--backlit-ring), 0 0 10px var(--backlit-glow); }
 .mm-flow-list p { margin: 4px 0; font-size: 12.5px; }
+.mm-back-btn { font-weight: 600; border-color: var(--accent) !important; }
+.mm-trail { display: inline-flex; align-items: center; gap: 6px; }
+.mm-trail .link { background: none !important; border: 0 !important; padding: 2px 4px !important; color: var(--accent); }
+.mm-editmode.on { background: #F28C38 !important; border-color: #F28C38 !important; color: #fff !important; }
+.mm-peek-notes { white-space: pre-wrap; background: rgba(255, 140, 40, 0.1); border-left: 4px solid #F28C38; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
+.mm-peek-links { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 10px; }
+.mm-edit select { padding: 7px 9px; border: 1px solid var(--chrome-border); border-radius: var(--radius); background: var(--bg); color: var(--fg); font: inherit; }
+.modal.mm-edit { max-height: 90vh; overflow: auto; }

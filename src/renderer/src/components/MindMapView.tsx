@@ -32,7 +32,8 @@ import {
   EMPTY_STATE,
   type Card,
   type MapNode,
-  type MapState
+  type MapState,
+  type DocLink
 } from '../lib/mindmap'
 import { renderMarkdown } from '../lib/markdown'
 import { findProcesses, flowFromSteps, type FlowNode, type Process } from '../lib/flowchart'
@@ -58,6 +59,14 @@ interface Props {
   loadState: () => Promise<string | null>
   /** Saves it; false when the document has no file yet. */
   saveState: (json: string) => Promise<boolean>
+  /** Opens a card's web link in the browser. */
+  openLink: (url: string) => void
+  /**
+   * While editing the map, Undo and Redo (menu, toolbar, Ctrl+Z / Ctrl+Y)
+   * act on the map instead of the document. Returns false when there was
+   * nothing to undo or redo.
+   */
+  registerUndo?: (fn: ((dir: 'undo' | 'redo') => boolean) | null) => void
 }
 
 const PALETTE = ['#4C9BE8', '#F28C38', '#4FB487', '#A77BE0', '#E2678C', '#36AFC0', '#C9A227', '#7F93AD']
@@ -206,7 +215,13 @@ export default function MindMapView(props: Props): React.JSX.Element {
   const [drag, setDrag] = useState<{ id: string; dx: number; dy: number } | null>(null)
   const [hover, setHover] = useState<string | null>(null)
   const [peek, setPeek] = useState<MapNode | null>(null)
-  const [editing, setEditing] = useState<{ node: MapNode | null; parent?: string; draft: { title: string } & Card } | null>(null)
+  type Draft = { title: string; notes: string; url: string; link: DocLink | null } & Card
+  const [editing, setEditing] = useState<{ node: MapNode | null; parent?: string; draft: Draft } | null>(null)
+  // Moving, adding, editing and linking cards only in Edit mind map mode.
+  const [editMode, setEditMode] = useState(false)
+  // Linking two cards: the first card picked, waiting for the second.
+  const [linking, setLinking] = useState<string | null>(null)
+  const hoverTimer = useRef<number | null>(null)
   const [banner, setBanner] = useState('')
   const [progress, setProgress] = useState('')
   const [unsaved, setUnsaved] = useState(false)
@@ -236,7 +251,39 @@ export default function MindMapView(props: Props): React.JSX.Element {
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, loaded])
-  const change = (fn: (s: MapState) => MapState): void => setState((s) => fn(s))
+  // Undo and redo for map edits: up to 50 steps back.
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const past = useRef<MapState[]>([])
+  const future = useRef<MapState[]>([])
+  const [, setHist] = useState(0)
+  const change = (fn: (s: MapState) => MapState): void => {
+    const cur = stateRef.current
+    const next = fn(cur)
+    if (next === cur) return
+    past.current = [...past.current.slice(-49), cur]
+    future.current = []
+    stateRef.current = next
+    setState(next)
+    setHist((h) => h + 1)
+  }
+  const undoRedo = (dir: 'undo' | 'redo'): boolean => {
+    const from = dir === 'undo' ? past : future
+    const to = dir === 'undo' ? future : past
+    const prev = from.current[from.current.length - 1]
+    if (!prev) return false
+    from.current = from.current.slice(0, -1)
+    to.current = [...to.current, stateRef.current]
+    stateRef.current = prev
+    setState(prev)
+    setHist((h) => h + 1)
+    return true
+  }
+  useEffect(() => {
+    props.registerUndo?.(editMode ? undoRedo : null)
+    return () => props.registerUndo?.(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMode])
 
   /* ------------------------------------------------------------ layout */
   const host = hostRef.current
@@ -417,7 +464,7 @@ export default function MindMapView(props: Props): React.JSX.Element {
   }
   const onCardMove = (e: React.PointerEvent): void => {
     const p = press.current
-    if (!p) return
+    if (!p || !editMode) return
     const dx = (e.clientX - p.x) / view.k
     const dy = (e.clientY - p.y) / view.k
     if (!p.moved && Math.hypot(dx, dy) * view.k < 5) return
@@ -438,7 +485,42 @@ export default function MindMapView(props: Props): React.JSX.Element {
       return
     }
     setDrag(null)
-    setPeek(n)
+    clickCard(n)
+  }
+
+  /** The heading a card belongs to (for going back up one level). */
+  const parentOf = (id: string): MapNode | null => {
+    let hit: MapNode | null = null
+    walk(tree, (n) => {
+      if (!hit && n.children.some((c) => c.id === id)) hit = n
+    })
+    return hit
+  }
+  /** The way down from the book to a card, for the breadcrumb trail. */
+  const pathTo = (id: string): MapNode[] => {
+    const out: MapNode[] = []
+    let n = findNode(tree, id)
+    while (n && n.kind !== 'doc') {
+      out.unshift(n)
+      n = parentOf(n.id)
+    }
+    return out
+  }
+
+  /**
+   * A click goes deeper: a chapter or topic opens its own map; a paragraph
+   * (or a card with nothing under it) shows its text. While linking, the
+   * click picks the second card.
+   */
+  const clickCard = (n: MapNode): void => {
+    if (linking) {
+      if (linking !== n.id) change((s) => ({ ...s, links: [...s.links.filter((l) => !(l.from === linking && l.to === n.id)), { from: linking, to: n.id }] }))
+      setLinking(null)
+      return
+    }
+    const isCurrentRoot = focusNode ? n.id === focusNode.id : n.kind === 'doc'
+    if (!isCurrentRoot && n.children.length && n.kind !== 'point') openMap(n)
+    else setPeek(n)
   }
 
   /* ---------------------------------------------------------- editing */
@@ -446,19 +528,46 @@ export default function MindMapView(props: Props): React.JSX.Element {
     setEditing({
       node,
       parent,
-      draft: node ? { title: node.title, ...node.card, keywords: [...node.card.keywords] } : { title: '', idea: '', keywords: [], summary: '' }
+      draft: node
+        ? {
+            title: node.title,
+            ...node.card,
+            keywords: [...node.card.keywords],
+            notes: node.notes ?? '',
+            url: node.url ?? '',
+            link: state.edits[node.id]?.link ?? null
+          }
+        : { title: '', idea: '', keywords: [], summary: '', notes: '', url: '', link: null }
     })
   const saveEdit = (): void => {
     if (!editing) return
     const { node, parent, draft } = editing
     const card = { idea: draft.idea.trim(), keywords: draft.keywords.map((k) => k.trim()).filter(Boolean).slice(0, 6), summary: draft.summary.trim() }
+    const url = draft.url.trim() && !/^[a-z][a-z0-9+.-]*:/i.test(draft.url.trim()) ? `https://${draft.url.trim()}` : draft.url.trim()
+    const extra = { notes: draft.notes.trim(), url, link: draft.link }
     if (!node && parent) {
       const id = `c${Date.now().toString(36)}`
-      change((s) => ({ ...s, custom: [...s.custom, { id, parent, title: draft.title.trim() || card.idea || 'My card', ...card }] }))
+      change((s) => ({
+        ...s,
+        custom: [...s.custom, { id, parent, title: draft.title.trim() || card.idea || 'My card', ...card }],
+        edits: { ...s.edits, [id]: extra }
+      }))
     } else if (node?.kind === 'custom') {
-      change((s) => ({ ...s, custom: s.custom.map((c) => (c.id === node.id ? { ...c, title: draft.title.trim() || c.title, ...card } : c)) }))
+      change((s) => ({
+        ...s,
+        custom: s.custom.map((c) => (c.id === node.id ? { ...c, title: draft.title.trim() || c.title, ...card } : c)),
+        edits: { ...s.edits, [node.id]: extra }
+      }))
     } else if (node) {
-      change((s) => ({ ...s, edits: { ...s.edits, [node.id]: { ...(node.kind === 'point' ? {} : { title: draft.title.trim() || node.title }), ...card } } }))
+      const before = node.card
+      const textSame = before.idea === card.idea && before.summary === card.summary && before.keywords.join() === card.keywords.join() && (node.kind === 'point' || node.title === draft.title.trim())
+      change((s) => ({
+        ...s,
+        edits: {
+          ...s.edits,
+          [node.id]: { ...(textSame ? {} : { ...(node.kind === 'point' ? {} : { title: draft.title.trim() || node.title }), ...card }), ...extra }
+        }
+      }))
     }
     setEditing(null)
   }
@@ -466,6 +575,15 @@ export default function MindMapView(props: Props): React.JSX.Element {
     if (n.kind === 'custom') change((s) => ({ ...s, custom: s.custom.filter((c) => c.id !== n.id && c.parent !== n.id) }))
     else change((s) => ({ ...s, hidden: [...s.hidden, n.id] }))
   }
+
+  /** Parts of the document a card can be linked to: every heading. */
+  const docParts = useMemo(() => {
+    const out: DocLink[] = []
+    walk(base, (n, d) => {
+      if (n.kind === 'heading') out.push({ line: n.line, end: n.end, slug: n.slug, label: `${'  '.repeat(Math.max(0, d - 1))}${n.title}` })
+    })
+    return out
+  }, [base])
 
   /* ------------------------------------------------------------ export */
   const svgText = (): string => {
@@ -516,14 +634,18 @@ export default function MindMapView(props: Props): React.JSX.Element {
   useEffect(() => {
     const k = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
-      if (editing) setEditing(null)
+      if (linking) setLinking(null)
+      else if (editing) setEditing(null)
       else if (peek) setPeek(null)
-      else if (props.focus) props.onFocus(null)
+      else if (focusNode) {
+        const up = parentOf(focusNode.id)
+        props.onFocus(up && up.kind !== 'doc' ? up.id : null)
+      }
       else props.onClose()
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [editing, peek, props])
+  }, [editing, peek, props, linking])
 
   /* -------------------------------------------------------- navigation */
   const chapters = tree.children
@@ -548,19 +670,42 @@ export default function MindMapView(props: Props): React.JSX.Element {
     <div className="mindmap-view" data-mn-ignore role="region" aria-label="Mind map">
       <div className="mm-bar">
         <span className="mm-crumbs">
-          <button className={!focusNode ? 'on' : ''} onClick={() => props.onFocus(null)} title="The whole book: its chapters">
-            📖 Book overview
-          </button>
           {focusNode && (
-            <>
-              <span className="mm-sep">›</span>
-              <span className="mm-here" title={focusNode.title}>
-                {focusNode.title}
+            <button
+              className="mm-back-btn"
+              onClick={() => {
+                const up = parentOf(focusNode.id)
+                props.onFocus(up && up.kind !== 'doc' ? up.id : null)
+              }}
+              title="Back up one level (Esc)"
+            >
+              ← Back
+            </button>
+          )}
+          <button className={!focusNode ? 'on' : ''} onClick={() => props.onFocus(null)} title="The first page: the whole book and its chapters">
+            ⌂ Book
+          </button>
+          {focusNode &&
+            pathTo(focusNode.id).map((n) => (
+              <span key={n.id} className="mm-trail">
+                <span className="mm-sep">›</span>
+                {n.id === focusNode.id ? (
+                  <span className="mm-here" title={n.title}>
+                    {n.title}
+                  </span>
+                ) : (
+                  <button className="link" onClick={() => props.onFocus(n.id)} title={n.title}>
+                    {n.title.length > 28 ? `${n.title.slice(0, 26)}…` : n.title}
+                  </button>
+                )}
               </span>
+            ))}
+          {focusNode && at >= 0 && (
+            <>
               <button onClick={() => at > 0 && props.onFocus(chapters[at - 1].id)} disabled={at <= 0} title="Previous chapter">
                 ‹
               </button>
-              <button onClick={() => at >= 0 && at < chapters.length - 1 && props.onFocus(chapters[at + 1].id)} disabled={at < 0 || at >= chapters.length - 1} title="Next chapter">
+              <button onClick={() => at < chapters.length - 1 && props.onFocus(chapters[at + 1].id)} disabled={at >= chapters.length - 1} title="Next chapter">
                 ›
               </button>
             </>
@@ -590,10 +735,30 @@ export default function MindMapView(props: Props): React.JSX.Element {
         <label className="mm-check" title="Show each card's two-sentence summary">
           <input type="checkbox" checked={showSum} onChange={(e) => setShowSum(e.target.checked)} /> Summaries
         </label>
+        <button
+          className={`mm-editmode${editMode ? ' on' : ''}`}
+          onClick={() => {
+            setEditMode((v) => !v)
+            setLinking(null)
+          }}
+          title={editMode ? 'Finish editing (changes are already saved)' : 'Edit the mind map: move, add, edit and link cards'}
+        >
+          {editMode ? '✓ Done editing' : '✎ Edit mind map'}
+        </button>
+        {editMode && (
+          <span className="mm-group">
+            <button onClick={() => undoRedo('undo')} disabled={!past.current.length} title={`Undo (Ctrl+Z) · ${past.current.length} step(s)`}>
+              ↶ Undo
+            </button>
+            <button onClick={() => undoRedo('redo')} disabled={!future.current.length} title={`Redo (Ctrl+Y) · ${future.current.length} step(s)`}>
+              ↷ Redo
+            </button>
+          </span>
+        )}
         <button className="mm-ai" onClick={() => void aiCards()} disabled={!!progress} title="Rewrite the cards on this map with the AI set up in the AI panel">
           ✨ AI cards
         </button>
-        {(state.hidden.length > 0 || Object.keys(state.moved).length > 0) && (
+        {editMode && (state.hidden.length > 0 || Object.keys(state.moved).length > 0) && (
           <button
             onClick={() => change((s) => ({ ...s, hidden: [], moved: {} }))}
             title="Bring back removed cards and put moved cards back in place (your own cards and edits stay)"
@@ -622,6 +787,15 @@ export default function MindMapView(props: Props): React.JSX.Element {
           ✕ Close
         </button>
       </div>
+      {kind === 'map' && (editMode || linking) && (
+        <div className="mm-banner busy">
+          <span>
+            {linking
+              ? 'Linking: click the card to link to (Esc to cancel).'
+              : 'Editing the mind map: drag cards to move them; hover a card for ＋ add, ✎ edit (text, notes, web link, document part), 🔗 link to another card, ✕ remove. Click a link line to remove it. Saved as you go; Undo and Redo go back up to 50 steps.'}
+          </span>
+        </div>
+      )}
       {(banner || progress || unsaved) && (
         <div className={`mm-banner${progress ? ' busy' : ''}`}>
           <span>{progress || banner || 'Your changes to this map are kept until you close the app. Save the document to keep them with it.'}</span>
@@ -672,6 +846,37 @@ export default function MindMapView(props: Props): React.JSX.Element {
                   <path key={`e-${p.n.id}`} d={edge(p.parent, p)} fill="none" stroke={p.color} strokeOpacity={0.75} strokeWidth={Math.max(1.3, 3.2 - p.depth * 0.6)} />
                 ) : null
               )}
+            {kind === 'map' &&
+              state.links.map((l, i) => {
+                const a = placed.find((p) => p.n.id === l.from)
+                const b = placed.find((p) => p.n.id === l.to)
+                if (!a || !b) return null
+                const ax = a.x + W / 2
+                const ay = a.y + a.h / 2
+                const bx = b.x + W / 2
+                const by = b.y + b.h / 2
+                const bend = Math.max(60, Math.abs(bx - ax) / 3)
+                const d = `M${ax},${ay} C${ax + bend},${ay - bend / 2} ${bx - bend},${by - bend / 2} ${bx},${by}`
+                return (
+                  <g key={`l-${i}`}>
+                    <path d={d} fill="none" stroke="#F28C38" strokeWidth={2} strokeDasharray="7 5" strokeOpacity={0.85} pointerEvents="none" />
+                    {editMode && (
+                      <path
+                        data-ui
+                        d={d}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth={14}
+                        style={{ cursor: 'pointer' }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={() => change((st) => ({ ...st, links: st.links.filter((_, j) => j !== i) }))}
+                      >
+                        <title>Click to remove this link</title>
+                      </path>
+                    )}
+                  </g>
+                )
+              })}
             {kind === 'map' && placed.map((p) => {
               const isRoot = p.depth === 0
               const lineH = isRoot ? 20 : 17
@@ -682,17 +887,20 @@ export default function MindMapView(props: Props): React.JSX.Element {
               const yKeys = p.y + 12 + p.title.length * lineH + 13
               const ySum = p.y + 12 + p.title.length * lineH + (p.keys ? 17 : 0) + 5
               const showTools = hover === p.n.id && !drag
-              const childCount = (() => {
-                let c = -1
-                walk(p.n, (x) => x.kind !== 'point' && c++)
-                return c
-              })()
               return (
                 <g
                   key={p.n.id}
                   className="mm-node"
-                  onPointerEnter={() => setHover(p.n.id)}
-                  onPointerLeave={() => setHover((h) => (h === p.n.id ? null : h))}
+                  onPointerEnter={() => {
+                    if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
+                    setHover(p.n.id)
+                  }}
+                  onPointerLeave={() => {
+                    // A moment's grace, so the buttons can be reached.
+                    if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
+                    const id = p.n.id
+                    hoverTimer.current = window.setTimeout(() => setHover((h) => (h === id ? null : h)), 600)
+                  }}
                 >
                   <rect
                     x={p.x}
@@ -708,9 +916,12 @@ export default function MindMapView(props: Props): React.JSX.Element {
                     onPointerDown={(e) => onCardDown(e, p.n)}
                     onPointerMove={onCardMove}
                     onPointerUp={() => onCardUp(p.n)}
-                    onDoubleClick={() => !isRoot && !focusNode && p.n.children.length && openMap(p.n)}
                   >
-                    <title>Click to see this passage · drag to move{!focusNode && !isRoot ? ' · double-click to open its map' : ''}</title>
+                    <title>
+                      {linking
+                        ? 'Click to link this card'
+                        : (p.n.children.length && p.n.kind !== 'point' && p.depth !== 0 ? 'Click to open its mind map' : 'Click to read this passage') + (editMode ? ' · drag to move' : '')}
+                    </title>
                   </rect>
                   {!isRoot && <rect x={p.x} y={p.y + 8} width={4} height={p.h - 16} rx={2} fill={p.color} pointerEvents="none" />}
                   {p.badge && (
@@ -743,17 +954,22 @@ export default function MindMapView(props: Props): React.JSX.Element {
                     </text>
                   )}
                   {/* Hover tools: open its map (overview), add a card, edit, remove. */}
-                  {showTools && (
-                    <g data-ui transform={`translate(${p.x + W - (p.badge ? 30 : 4)} ${p.y - 13})`}>
+                  {showTools && !linking && (
+                    <g data-ui transform={`translate(${p.x + W - (p.badge ? 34 : 10)} ${p.y + p.h - 16})`}>
                       {[
-                        ...(!focusNode && !isRoot && p.n.children.length ? [{ k: 'map', label: '⤢', tip: `Open the map of this chapter (${childCount} topics)`, fn: () => openMap(p.n) }] : []),
-                        { k: 'add', label: '＋', tip: 'Add your own card under this one', fn: () => openEdit(null, p.n.id) },
-                        { k: 'edit', label: '✎', tip: 'Edit this card', fn: () => openEdit(p.n) },
-                        ...(!isRoot ? [{ k: 'del', label: '✕', tip: p.n.kind === 'custom' ? 'Delete your card' : 'Remove this card from the map (the document is not changed)', fn: () => remove(p.n) }] : [])
+                        ...(p.n.line >= 0 ? [{ k: 'show', label: '📄', tip: 'Show in document (in a popup)', fn: () => setPeek(p.n) }] : []),
+                        ...(editMode
+                          ? [
+                              { k: 'add', label: '＋', tip: 'Add your own card under this one', fn: () => openEdit(null, p.n.id) },
+                              { k: 'edit', label: '✎', tip: 'Edit this card: text, notes, web link, linked part of the document', fn: () => openEdit(p.n) },
+                              { k: 'link', label: '🔗', tip: 'Link this card to another card (then click the other card)', fn: () => setLinking(p.n.id) },
+                              ...(!isRoot ? [{ k: 'del', label: '✕', tip: p.n.kind === 'custom' ? 'Delete your card' : 'Remove this card from the map (the document is not changed)', fn: () => remove(p.n) }] : [])
+                            ]
+                          : [])
                       ]
                         .reverse()
                         .map((b, i) => (
-                          <g key={b.k} transform={`translate(${-i * 26 - 12} 0)`} style={{ cursor: 'pointer' }} onPointerDown={(e) => e.stopPropagation()} onClick={b.fn}>
+                          <g key={b.k} transform={`translate(${-i * 26 - 12} 0)`} style={{ cursor: 'pointer' }} onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onClick={(e) => (e.stopPropagation(), b.fn())}>
                             <circle r={11} cx={0} cy={0} fill={colors.card} stroke={p.color} strokeWidth={1.4} />
                             <text textAnchor="middle" dy={4} fontSize={12} fill={colors.text}>
                               {b.label}
@@ -788,8 +1004,8 @@ export default function MindMapView(props: Props): React.JSX.Element {
         {kind === 'flow'
           ? 'Flowchart: Start → steps → End; diamonds are decisions (Yes continues down, No goes to the side) · wheel to zoom · drag to move'
           : focusNode
-          ? 'Click a card to see its passage · drag a card to move it (its branch moves too) · hover a card to add, edit or remove · Esc: back to the book'
-          : 'Chapters in reading order · click a card to see it · ⤢ or double-click opens the chapter’s own map · drag to arrange · Alt+M or Esc closes'}
+          ? 'Click a topic to open its map, a paragraph card to read it · 📄 on a card shows it in the document · ← Back or Esc goes up a level · ✎ Edit mind map to move, add, edit and link cards'
+          : 'Chapters in reading order · click a chapter to open its mind map · 📄 on a card shows it in the document · Alt+M or Esc closes'}
       </div>
 
       {peek && (
@@ -802,6 +1018,26 @@ export default function MindMapView(props: Props): React.JSX.Element {
               {peek.card.summary && <div className="mm-peek-sum">{peek.card.summary}</div>}
               <div className="mm-peek-src">{peek.source === 'ai' ? 'Card written by AI' : peek.source === 'you' ? 'Your card' : 'Quick offline card'}</div>
             </div>
+            {peek.notes && <div className="mm-peek-notes">{peek.notes}</div>}
+            {(peek.url || state.links.some((l) => l.from === peek.id || l.to === peek.id)) && (
+              <div className="mm-peek-links">
+                {peek.url && (
+                  <button className="link" onClick={() => props.openLink(peek.url!)} title={peek.url}>
+                    🌐 Open web link
+                  </button>
+                )}
+                {state.links
+                  .filter((l) => l.from === peek.id || l.to === peek.id)
+                  .map((l) => {
+                    const other = findNode(tree, l.from === peek.id ? l.to : l.from)
+                    return other ? (
+                      <button key={other.id} className="link" onClick={() => setPeek(other)} title="Linked card">
+                        🔗 {other.kind === 'point' ? other.card.idea : other.title}
+                      </button>
+                    ) : null
+                  })}
+              </div>
+            )}
             {peekHtml ? <div className="markdown-body mm-peek-text" dangerouslySetInnerHTML={{ __html: peekHtml }} /> : <p className="muted">This is your own card; it has no passage in the document.</p>}
             <div className="modal-actions">
               {!focusNode && peek.kind !== 'doc' && peek.children.length > 0 && (
@@ -810,15 +1046,17 @@ export default function MindMapView(props: Props): React.JSX.Element {
               {focusNode && peek.kind === 'heading' && peek.id !== focusNode.id && peek.children.some((c) => c.kind !== 'point') && (
                 <button onClick={() => openMap(peek)}>⤢ Map of this topic</button>
               )}
-              <button
-                onClick={() => {
-                  const n = peek
-                  setPeek(null)
-                  openEdit(n)
-                }}
-              >
-                ✎ Edit card
-              </button>
+              {editMode && (
+                <button
+                  onClick={() => {
+                    const n = peek
+                    setPeek(null)
+                    openEdit(n)
+                  }}
+                >
+                  ✎ Edit card
+                </button>
+              )}
               {peek.line >= 0 && (
                 <button
                   onClick={() => {
@@ -827,7 +1065,7 @@ export default function MindMapView(props: Props): React.JSX.Element {
                     props.onShowInDocument({ slug: n.slug, line: n.line })
                   }}
                 >
-                  Show in document
+                  Open in full document
                 </button>
               )}
               <button className="primary" onClick={() => setPeek(null)}>
@@ -865,7 +1103,32 @@ export default function MindMapView(props: Props): React.JSX.Element {
             </label>
             <label>
               <span>Summary (about two sentences)</span>
-              <textarea rows={4} value={editing.draft.summary} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, summary: e.target.value } })} />
+              <textarea rows={3} value={editing.draft.summary} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, summary: e.target.value } })} />
+            </label>
+            <label>
+              <span>Your notes (shown when the card is opened)</span>
+              <textarea rows={3} value={editing.draft.notes} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, notes: e.target.value } })} />
+            </label>
+            <label>
+              <span>Web link</span>
+              <input placeholder="https://…" value={editing.draft.url} onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, url: e.target.value } })} />
+            </label>
+            <label>
+              <span>Linked part of the document (shown by “Show in document”)</span>
+              <select
+                value={editing.draft.link ? String(editing.draft.link.line) : ''}
+                onChange={(e) => {
+                  const part = docParts.find((d) => String(d.line) === e.target.value) ?? null
+                  setEditing({ ...editing, draft: { ...editing.draft, link: part ? { ...part, label: part.label.trim() } : null } })
+                }}
+              >
+                <option value="">{editing.node && editing.node.kind !== 'custom' ? 'Its own place in the document' : 'None'}</option>
+                {docParts.map((d) => (
+                  <option key={d.line} value={String(d.line)}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <div className="modal-actions">
               {editing.node && state.edits[editing.node.id] && (

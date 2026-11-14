@@ -200,6 +200,8 @@ export default function App(): React.JSX.Element {
   // reader left it to look at the document (then a button leads back).
   const [mindFocus, setMindFocus] = useState<string | null>(null)
   const [mindBack, setMindBack] = useState(false)
+  // While the mind map is being edited, Undo and Redo act on the map.
+  const mindUndo = useRef<((dir: 'undo' | 'redo') => boolean) | null>(null)
   // The table editor: picking a size for a new table, or editing one.
   const [tableDialog, setTableDialog] = useState<
     | { kind: 'size'; from: number; to: number }
@@ -1034,11 +1036,19 @@ export default function App(): React.JSX.Element {
           setPendingQuick(action.slice('ai:quick:'.length) as AiMode)
           return
         case 'edit:undo':
-          doUndo()
+        case 'edit:redo': {
+          const dir = action === 'edit:undo' ? 'undo' : 'redo'
+          if (mindUndo.current) {
+            // Typing in a box on the map: the box's own undo.
+            const el = document.activeElement as HTMLElement | null
+            if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName)) document.execCommand(dir)
+            else mindUndo.current(dir)
+            return
+          }
+          if (dir === 'undo') doUndo()
+          else doRedo()
           return
-        case 'edit:redo':
-          doRedo()
-          return
+        }
         case 'convert:settings':
           setConvertSeed((s) => s ?? [])
           return
@@ -1788,6 +1798,8 @@ export default function App(): React.JSX.Element {
               dark={dark}
               focus={mindFocus}
               onFocus={setMindFocus}
+              openLink={(url) => window.open(url, '_blank', 'noopener')}
+              registerUndo={(fn) => (mindUndo.current = fn)}
               onClose={() => {
                 setMindOpen(false)
                 setMindBack(false)
