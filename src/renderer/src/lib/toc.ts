@@ -63,6 +63,40 @@ export function refreshToc(markdown: string): string {
   return markdown.replace(TOC_BLOCK, () => tocBlock(markdown))
 }
 
+/**
+ * Adds a contents block at the top of the document, or brings an existing
+ * one up to date. "The top" is just under the title (the first # heading)
+ * when the document opens with one, otherwise the very start. It never goes
+ * where the cursor happens to be: a contents list belongs at the front.
+ */
+export function placeToc(markdown: string): { text: string; updated: boolean; moved?: boolean } {
+  if (hasToc(markdown)) {
+    // One put lower down earlier (where the cursor was) moves to the top.
+    const at = markdown.search(TOC_BLOCK)
+    const before = markdown
+      .slice(0, at)
+      .replace(/^---\n[\s\S]*?\n---\n/, '')
+      .replace(/^\s*#\s[^\n]*\n/, '')
+      .trim()
+    if (!before) return { text: refreshToc(markdown), updated: true }
+    const without = markdown.replace(/\n*<!-- toc -->\n[\s\S]*?<!-- \/toc -->\n*/, '\n\n')
+    return { ...placeToc(without), updated: true, moved: true }
+  }
+  const lines = markdown.split('\n')
+  let at = 0
+  // Skip YAML front matter.
+  if (lines[0]?.trim() === '---') {
+    const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
+    if (end > 0) at = end + 1
+  }
+  while (at < lines.length && !lines[at].trim()) at++
+  if (/^#\s/.test(lines[at] ?? '')) at++
+  const block = tocBlock(markdown)
+  const before = lines.slice(0, at).join('\n').replace(/\s+$/, '')
+  const after = lines.slice(at).join('\n').replace(/^\s+/, '')
+  return { text: `${before ? `${before}\n\n` : ''}${block}\n\n${after}`, updated: false }
+}
+
 /* ------------------------------------------------- older converted files */
 
 const OLD_PAGE_HEADING = /^## Page (\d{1,5})\s*$/

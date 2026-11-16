@@ -41,7 +41,7 @@ import {
 } from './lib/history'
 import { extractHeadings, documentStats, renderMarkdown, standaloneHtml } from './lib/markdown'
 import { readPageSize, hasScans, removeScans } from './lib/pages'
-import { tocBlock, refreshToc, hasToc, hasOldPageHeadings, upgradeOldPages } from './lib/toc'
+import { placeToc, refreshToc, hasToc, hasOldPageHeadings, upgradeOldPages } from './lib/toc'
 import {
   applyAnnotation,
   listAnnotations,
@@ -1343,9 +1343,25 @@ export default function App(): React.JSX.Element {
           else setTableDialog({ kind: 'size', from, to })
           return
         }
-        case 'insert:toc':
-          // Links to every heading; rebuilt by itself when headings change.
-          return editorEdit((t, f, to) => insertBlock(t, f, to, tocBlock(t)))
+        case 'insert:diagram': {
+          // A starter Mermaid diagram: drawn in View mode and the preview.
+          const block = '```mermaid\nflowchart TD\n  A[Start] --> B{Decision?}\n  B -- Yes --> C[Do this]\n  B -- No --> D[Do that]\n  C --> E[End]\n  D --> E\n```'
+          if (mode === 'edit' && editorRef.current) return editorEdit((t, f, to) => insertBlock(t, f, to, block))
+          commitContent(content.replace(/\s*$/, '') + '\n\n' + block + '\n', 'Insert diagram')
+          flash('Diagram added at the end. Edit its text in Edit mode (mermaid.js.org shows every kind). Ctrl+Z to undo.')
+          return
+        }
+        case 'insert:toc': {
+          // Always at the top (under the title), or the existing one updated.
+          const r = placeToc(content)
+          if (r.text === content) {
+            flash('The table of contents is already up to date.')
+            return
+          }
+          commitContent(r.text, r.updated ? 'Update table of contents' : 'Insert table of contents')
+          flash(r.moved ? 'Table of contents moved to the top of the document and updated. Ctrl+Z to undo.' : r.updated ? 'Table of contents updated.' : 'Table of contents added at the top. It updates itself when you save. Ctrl+Z to undo.')
+          return
+        }
         case 'insert:link': {
           if (mode !== 'edit') {
             flash('Switch to Edit mode (Ctrl+E) to insert a link.')
@@ -1375,13 +1391,15 @@ export default function App(): React.JSX.Element {
           setShowAbout(true)
           return
         case 'help:analytics': {
-          if (!analyticsAvailable()) {
-            flash('Usage statistics are not set up in this build: nothing is sent.')
-            return
-          }
           const next = !analyticsOn()
           setAnalytics(next)
-          flash(next ? 'Anonymous usage statistics on. Nothing you write is ever sent.' : 'Usage statistics off: nothing is sent.')
+          flash(
+            !next
+              ? 'Usage statistics off: nothing is sent.'
+              : analyticsAvailable()
+                ? 'Anonymous usage statistics on: only which features are used, never what you write.'
+                : 'Usage statistics on. (This test build has no statistics key yet, so nothing is actually sent.)'
+          )
           return
         }
         case 'help:featureVote':
@@ -1909,6 +1927,11 @@ export default function App(): React.JSX.Element {
                   if (!model) model = (await window.api.aiModels(provider))?.models?.[0] ?? ''
                   return window.api.aiChat({ provider, model, system, messages: [{ role: 'user', content: user }], temperature: 0.2, maxTokens: 1200 })
                 }
+              }}
+              saveText={async (name, text) => {
+                const r = await window.api.exportText({ text, suggestedName: name, title: 'Save study cards' })
+                if (r.ok) flash(`Saved ${r.filePath ?? name}`)
+                else if (r.error) flash(`Could not save: ${r.error}`)
               }}
               saveImage={async (name, data) => {
                 const r = await window.api.exportImage({ bytes: new Uint8Array(await data.arrayBuffer()), suggestedName: name })

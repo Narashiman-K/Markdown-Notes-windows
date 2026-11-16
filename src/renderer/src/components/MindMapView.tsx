@@ -21,6 +21,7 @@
  * Kept identical across the Windows app and the web app.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import StudyPanel from './StudyPanel'
 import {
   applyState,
   buildTree,
@@ -54,6 +55,8 @@ interface Props {
     ask: (system: string, user: string) => Promise<{ ok: boolean; text?: string; error?: string }>
   }
   saveImage: (name: string, data: Blob) => Promise<void>
+  /** Saves a text file the reader names (study cards for Anki or a spreadsheet). */
+  saveText: (name: string, text: string, mime: string) => Promise<void>
   print: (html: string) => Promise<void>
   /** The reader's saved map for this document (JSON), or null. */
   loadState: () => Promise<string | null>
@@ -225,10 +228,24 @@ export default function MindMapView(props: Props): React.JSX.Element {
   const [banner, setBanner] = useState('')
   const [progress, setProgress] = useState('')
   const [unsaved, setUnsaved] = useState(false)
+  // The study panel: quiz, Q&A cards, tags and search, export.
+  const [study, setStudy] = useState(false)
   const hostRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const alive = useRef(true)
-  useEffect(() => () => void (alive.current = false), [])
+  /* The running AI job. Starting another, going to another map, switching
+   * between mind map and flowchart, or Stop ends it: its answer is ignored. */
+  const job = useRef(0)
+  const cancelAi = (): void => {
+    job.current++
+    setProgress('')
+  }
+  // Set on every mount: in development React mounts twice, and a flag left
+  // false made the map ignore its saved state and every AI answer.
+  useEffect(() => {
+    alive.current = true
+    return () => void (alive.current = false)
+  }, [])
 
   const colors = dark
     ? { bg: '#1b1d22', card: '#262a31', text: '#e8e8e8', muted: '#a9b0ba', root: '#2f6fb0', key: '#f2a65a' }
@@ -236,11 +253,14 @@ export default function MindMapView(props: Props): React.JSX.Element {
 
   /* ------------------------------------------------------------ saving */
   useEffect(() => {
-    void props.loadState().then((json) => {
-      if (!alive.current) return
-      setState(readState(json))
-      setLoaded(true)
-    })
+    // Whatever happens reading it, the map works (and saves) from here on.
+    void props
+      .loadState()
+      .then(
+        (json) => alive.current && setState(readState(json)),
+        () => undefined
+      )
+      .finally(() => alive.current && setLoaded(true))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => {
@@ -323,6 +343,11 @@ export default function MindMapView(props: Props): React.JSX.Element {
   const frames = laidOut.frames
 
   const scopeId = focusNode?.id ?? 'doc'
+  // Going elsewhere (Back, Book, another chapter, map ↔ flowchart) stops a running AI job.
+  useEffect(() => {
+    cancelAi()
+    setBanner('')
+  }, [scopeId, kind])
   const processes = useMemo(() => {
     const found = findProcesses(props.source, focusNode ? focusNode.line : 0, focusNode ? focusNode.end : undefined)
     return aiFlow[scopeId] ? [aiFlow[scopeId], ...found] : found
@@ -373,8 +398,14 @@ export default function MindMapView(props: Props): React.JSX.Element {
   const passage = (n: MapNode): string => (n.line >= 0 ? props.source.split('\n').slice(n.line, n.end).join('\n') : '')
 
   const aiCards = async (): Promise<void> => {
+    const id = ++job.current
+    const live = (): boolean => alive.current && job.current === id
+    setBanner('')
+    setProgress('Checking the AI…')
     const s = await props.ai.status()
+    if (!live()) return
     if (!s.ready) {
+      setProgress('')
       setBanner(`No AI is connected (local Ollama or an API key), so AI cards were not made${s.detail ? ` (${s.detail})` : ''}. The offline cards stay. Connect one in the AI panel, then try again.`)
       return
     }
@@ -386,7 +417,7 @@ export default function MindMapView(props: Props): React.JSX.Element {
       if (n.kind !== 'custom' && n.source === 'offline' && plainText(passage(n)).length > 40) todo.push(n)
     })
     const ai: Record<string, Card> = {}
-    for (let i = 0; i < todo.length && alive.current; i += 6) {
+    for (let i = 0; i < todo.length && live(); i += 6) {
       const batch = todo.slice(i, i + 6)
       setProgress(`Writing AI cards: ${Math.min(i + 6, todo.length)} of ${todo.length}…`)
       const user = batch.map((n) => `### ${n.id}\nTitle: ${n.kind === 'point' ? '(a paragraph)' : n.title}\n${plainText(passage(n)).slice(0, 2400)}`).join('\n\n')
@@ -394,6 +425,7 @@ export default function MindMapView(props: Props): React.JSX.Element {
         'You turn passages of a document into revision cards for a mind map, so a reader can glance at a card and recall the whole passage. For each passage write: "idea": the single key idea, at most 15 words; "keywords": 2 to 4 short trigger words or phrases from the passage; "summary": exactly two plain sentences with the essential points (facts, steps, reasons, examples), no filler. Write in the passage\'s own language. Reply with JSON only, keyed by passage id: {"<id>": {"idea": "…", "keywords": ["…"], "summary": "…"}}.',
         user
       )
+      if (!live()) return
       if (!r.ok) {
         setBanner(`The AI could not make cards (${r.error ?? 'no answer'}). The offline cards stay.`)
         break
@@ -404,32 +436,39 @@ export default function MindMapView(props: Props): React.JSX.Element {
           const c = json[n.id]
           if (c && typeof c.idea === 'string') ai[n.id] = { idea: c.idea.trim(), keywords: Array.isArray(c.keywords) ? c.keywords.map(String).slice(0, 4) : n.card.keywords, summary: String(c.summary ?? n.card.summary).trim() }
         }
-        if (alive.current) change((st) => ({ ...st, ai: { ...st.ai, ...ai } }))
+        if (live()) change((st) => ({ ...st, ai: { ...st.ai, ...ai } }))
       } catch {
         /* not JSON: those cards keep their offline text */
       }
     }
-    if (alive.current) setProgress('')
+    if (live()) setProgress('')
   }
 
   /** Asks the AI to turn this part's main process into numbered steps. */
   const aiSteps = async (): Promise<void> => {
+    const id = ++job.current
+    const live = (): boolean => alive.current && job.current === id
+    setBanner('')
+    setProgress('Checking the AI…')
     const s = await props.ai.status()
+    if (!live()) return
     if (!s.ready) {
+      setProgress('')
       setBanner('No AI is connected (local Ollama or an API key), so a flowchart could not be made from the text. Flowcharts are still made from any numbered steps in the document.')
       return
     }
-    setProgress('Asking the AI for the steps…')
-    const text = plainText(focusNode ? passage(focusNode) : props.source).slice(0, 12000)
+    setProgress('Building the flowchart with AI… A local model can take a minute or two.')
+    // Kept short: a local model on a laptop takes minutes over a long text.
+    const text = plainText(focusNode ? passage(focusNode) : props.source).slice(0, 6000)
     const r = await props.ai.ask(
       'You turn the main process or method described in a passage into a flowchart. Reply with numbered steps only, one per line ("1. …"), each a short instruction of at most 15 words. Write a decision as a yes/no question ending in "?", and put its "no" path as the very next step starting with "Otherwise". Use 4 to 14 steps. No other text.',
       text
     )
-    if (!alive.current) return
+    if (!live()) return
     setProgress('')
     const p = r.ok ? findProcesses(String(r.text ?? ''))[0] : undefined
     if (!p) {
-      setBanner(`The AI could not make steps from this text${r.ok ? '' : ` (${r.error ?? 'no answer'})`}.`)
+      setBanner(r.ok ? 'The AI could not make steps from this text.' : /time|abort/i.test(r.error ?? '') ? `The AI took too long (${r.error}). A local model is slow on long text: open one chapter first (click it on the mind map), then try again, or use a free API key in the AI panel.` : `The AI could not make steps from this text (${r.error ?? 'no answer'}).`)
       return
     }
     setAiFlow((a) => ({ ...a, [scopeId]: { ...p, title: `${focusNode?.title ?? 'This document'} (steps by AI)`, line: focusNode?.line ?? 0 } }))
@@ -758,6 +797,9 @@ export default function MindMapView(props: Props): React.JSX.Element {
         <button className="mm-ai" onClick={() => void aiCards()} disabled={!!progress} title="Rewrite the cards on this map with the AI set up in the AI panel">
           ✨ AI cards
         </button>
+        <button className={`mm-study${study ? ' on' : ''}`} onClick={() => setStudy((v) => !v)} title="Study: quiz yourself, question-and-answer cards, tags and search, export to Anki or a spreadsheet">
+          🎓 Study
+        </button>
         {editMode && (state.hidden.length > 0 || Object.keys(state.moved).length > 0) && (
           <button
             onClick={() => change((s) => ({ ...s, hidden: [], moved: {} }))}
@@ -802,6 +844,11 @@ export default function MindMapView(props: Props): React.JSX.Element {
           {banner && !progress && (
             <button className="link" onClick={() => setBanner('')}>
               Dismiss
+            </button>
+          )}
+          {progress && (
+            <button className="link" onClick={cancelAi}>
+              Stop
             </button>
           )}
         </div>
@@ -997,6 +1044,31 @@ export default function MindMapView(props: Props): React.JSX.Element {
               ✨ Make one with AI
             </button>
           </div>
+        )}
+        {progress && (
+          <div className="mm-working" onPointerDown={(e) => e.stopPropagation()} role="status" aria-live="polite">
+            <span className="mm-spinner" aria-hidden="true" />
+            <span>{progress}</span>
+            <span className="muted small">You can keep using the map; Back, Book or Stop cancels it.</span>
+            <button onClick={cancelAi}>Stop</button>
+          </div>
+        )}
+        {kind === 'map' && study && (
+          <StudyPanel
+            tree={tree}
+            scope={focusNode ?? tree}
+            source={props.source}
+            name={props.name}
+            state={state}
+            change={change}
+            ai={props.ai}
+            saveText={props.saveText}
+            onOpen={(node, chapterId) => {
+              props.onFocus(chapterId === tree.id ? null : chapterId)
+              if (node.line >= 0 && node.kind !== 'doc') setPeek(node)
+            }}
+            onClose={() => setStudy(false)}
+          />
         )}
         {kind === 'map' && placed.length <= 1 && <div className="mm-empty">This document has no headings yet. Add some (Insert → Heading) and they become the cards of the map.</div>}
       </div>

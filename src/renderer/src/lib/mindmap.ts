@@ -346,6 +346,12 @@ export interface MapState {
   hidden: string[]
   /** Cards written by the AI. */
   ai: Record<string, Card>
+  /** Study (lib/study.ts): your or the AI's question and answer for a card. */
+  qa?: Record<string, { q: string; a: string }>
+  /** Study: the quiz's memory of each card. */
+  quiz?: Record<string, { known: boolean; seen: number; at: number }>
+  /** Study: tags on cards. */
+  tags?: Record<string, string[]>
 }
 
 export const EMPTY_STATE: MapState = { v: 1, moved: {}, edits: {}, links: [], custom: [], hidden: [], ai: {} }
@@ -362,7 +368,10 @@ export function readState(json: string | null | undefined): MapState {
       links: Array.isArray(s.links) ? s.links.filter((l) => l && typeof l.from === 'string' && typeof l.to === 'string') : [],
       custom: Array.isArray(s.custom) ? s.custom.filter((c) => c && typeof c.id === 'string' && typeof c.parent === 'string') : [],
       hidden: Array.isArray(s.hidden) ? s.hidden.filter((h) => typeof h === 'string') : [],
-      ai: typeof s.ai === 'object' && s.ai ? s.ai : {}
+      ai: typeof s.ai === 'object' && s.ai ? s.ai : {},
+      qa: typeof s.qa === 'object' && s.qa ? s.qa : {},
+      quiz: typeof s.quiz === 'object' && s.quiz ? s.quiz : {},
+      tags: typeof s.tags === 'object' && s.tags ? s.tags : {}
     }
   } catch {
     return { ...EMPTY_STATE }

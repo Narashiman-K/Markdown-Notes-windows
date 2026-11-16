@@ -1822,3 +1822,42 @@ button.danger { color: #d13438; }
 .aitools-progress .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aitools-bar { height: 6px; border-radius: 3px; background: rgba(127, 127, 127, 0.2); overflow: hidden; }
 .aitools-bar span { display: block; height: 100%; background: #e8833a; box-shadow: 0 0 8px rgba(232, 131, 58, 0.6); transition: width 0.3s; }
+
+/* Mind map: an AI job at work */
+.mm-working { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 360px; padding: 20px 24px; text-align: center; border-radius: 12px; background: var(--chrome); color: var(--fg); border: 1px solid #e8833a; box-shadow: 0 0 18px rgba(232, 131, 58, 0.45); }
+.mm-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(232, 131, 58, 0.25); border-top-color: #e8833a; animation: mm-spin 0.9s linear infinite; }
+@keyframes mm-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .mm-spinner { animation-duration: 3s; } }
+
+/* Mind map: Study panel */
+.mm-study.on { border-color: #e8833a; box-shadow: 0 0 8px rgba(232, 131, 58, 0.5); }
+.st-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(400px, 92%); z-index: 6; display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow: hidden; background: var(--chrome); color: var(--fg); border-left: 1px solid var(--chrome-border); box-shadow: -6px 0 18px rgba(0, 0, 0, 0.25); cursor: default; }
+.st-head { display: flex; align-items: center; gap: 8px; }
+.st-head .muted { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-progress { height: 5px; border-radius: 3px; background: rgba(127, 127, 127, 0.2); overflow: hidden; }
+.st-progress span { display: block; height: 100%; background: #4fb487; transition: width 0.3s; }
+.st-tabs { display: flex; }
+.st-tabs button { flex: 1; font-size: 12px; }
+.st-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+.st-body > button { align-self: flex-start; }
+.st-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.st-wrap { flex-wrap: wrap; justify-content: flex-start; }
+.st-busy { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.st-busy .mm-spinner { width: 18px; height: 18px; border-width: 2px; }
+.st-note { margin: 0; padding: 6px 8px; border-radius: 6px; background: rgba(232, 131, 58, 0.12); }
+.st-flash { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 10px; border: 1px solid #e8833a; box-shadow: 0 0 12px rgba(232, 131, 58, 0.35); background: var(--bg); }
+.st-q { font-size: 16px; font-weight: 600; line-height: 1.4; }
+.st-a { white-space: pre-wrap; line-height: 1.5; padding-top: 8px; border-top: 1px dashed var(--rule); }
+.st-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.st-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.st-list li { padding: 8px; border-radius: 8px; border: 1px solid var(--chrome-border); background: var(--bg); }
+.st-card-q { display: flex; gap: 6px; justify-content: space-between; font-weight: 600; }
+.st-card-a { margin: 4px 0; white-space: pre-wrap; }
+.st-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.st-tag { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--chrome-border); background: transparent; color: var(--muted); }
+.st-tag.on { color: var(--fg); border-color: #e8833a; background: rgba(232, 131, 58, 0.18); }
+.st-edit { display: flex; flex-direction: column; gap: 6px; }
+.st-edit label { display: flex; flex-direction: column; gap: 3px; }
+.st-edit textarea { width: 100%; resize: vertical; font: inherit; }
+.st-found { display: flex; flex-direction: column; align-items: flex-start; width: 100%; text-align: left; background: transparent; border: none; color: inherit; padding: 0; }
+.st-body input[type='search'], .st-row input { flex: 1; padding: 6px 8px; }

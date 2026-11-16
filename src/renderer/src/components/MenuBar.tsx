@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { analyticsAvailable, analyticsOn } from '../lib/analytics'
+import { analyticsOn } from '../lib/analytics'
 import { REPO_URL, STORE_URL, featureRequestUrl } from '../../../shared/brand'
 
 /**
@@ -205,6 +205,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
         { label: 'Image…', action: 'insert:image' },
         { label: 'Table', action: 'insert:table' },
       { label: 'Table of contents', action: 'insert:toc' },
+        { label: 'Diagram (Mermaid)', action: 'insert:diagram' },
         { label: 'Code block', action: 'insert:codeblock' },
         { label: 'Horizontal rule', action: 'insert:hr' }
       ]
@@ -260,7 +261,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
         { label: 'Privacy policy', href: `${REPO_URL}/blob/main/docs/privacy.md` },
         { label: 'Rate it in the Store', href: STORE_URL },
         { separator: true, label: '' },
-        { label: 'Send anonymous usage statistics', action: 'help:analytics', checked: analyticsAvailable() && analyticsOn() },
+        { label: 'Send anonymous usage statistics', action: 'help:analytics', checked: analyticsOn() },
         { label: 'About', action: 'help:about' }
       ]
     }

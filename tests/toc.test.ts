@@ -75,3 +75,28 @@ describe('rendering page notes', () => {
     expect(html).toMatch(/<section class="mn-sheet" id="page-2">/)
   })
 })
+
+describe('placing a table of contents', () => {
+  it('goes under the title, not at the end', async () => {
+    const { placeToc } = await import('../src/renderer/src/lib/toc')
+    const r = placeToc('# Book\n\nIntro text.\n\n## One\n\nA.\n\n## Two\n\nB.\n')
+    expect(r.updated).toBe(false)
+    expect(r.text.indexOf('<!-- toc -->')).toBeLessThan(r.text.indexOf('Intro text.'))
+    expect(r.text.startsWith('# Book\n\n<!-- toc -->')).toBe(true)
+    expect(placeToc(r.text).updated).toBe(true)
+  })
+  it('goes first when there is no title', async () => {
+    const { placeToc } = await import('../src/renderer/src/lib/toc')
+    expect(placeToc('## One\n\nA.\n').text.startsWith('<!-- toc -->')).toBe(true)
+  })
+})
+
+describe('a contents block lower down', () => {
+  it('moves to the top', async () => {
+    const { placeToc } = await import('../src/renderer/src/lib/toc')
+    const r = placeToc('# Book\n\nIntro.\n\n## One\n\nA.\n\n<!-- toc -->\nold\n<!-- /toc -->\n')
+    expect(r.moved).toBe(true)
+    expect(r.text.startsWith('# Book\n\n<!-- toc -->\n- [One](#one)')).toBe(true)
+    expect(r.text.match(/<!-- toc -->/g)?.length).toBe(1)
+  })
+})

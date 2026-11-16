@@ -91,7 +91,7 @@ second scheme, `mn-local:`, which serves image files only and is allowed only
 in the CSP's `img-src`.
 
 Every window also gets: a permission handler that refuses everything except
-clipboard writes and full screen; `<webview>` is refused; `setWindowOpenHandler` and `will-navigate` guards, so a link
+clipboard writes, full screen and the microphone (audio only, for dictation); `<webview>` is refused; `setWindowOpenHandler` and `will-navigate` guards, so a link
 in a document can never navigate the app page (web links open in the browser).
 
 ### Several windows
@@ -248,6 +248,23 @@ CodeMirror keeps its own history, but that only covers typing in the source
 editor. Annotations applied in view mode and edits made by the AI happen outside
 it, so a 120-entry document-level stack sits above the whole thing.
 
+### Added in 1.3
+
+All in `src/renderer/src/lib/` (identical in the web app), with their UI in `components/`.
+
+| Module | What it does |
+| --- | --- |
+| `speech/` (dictation, read aloud) | Whisper (dictation) and Kokoro (natural voice, fp32 on WebGPU) run in workers through transformers.js; models download once from Hugging Face. Read aloud prepares 8 sentences ahead and highlights with the CSS Custom Highlight API. |
+| `speech/audiobook.ts` | Read aloud from a real audiobook: aligns Book2Audio's `.b2a.json` paragraph times to the page's paragraphs by their opening words (a heading only counts when the narration continues into the next block, so a table of contents is not matched), spreads a paragraph's time over its sentences allowing for pauses, snaps to Book2Audio's sentence times, and confirms each sentence start by listening for the narrator's pauses (WebAudio analyser). |
+| `toc.ts` | Contents blocks between `<!-- toc -->` markers: inserted at the top (under the title), moved there if found lower down, rebuilt on save. Also upgrades older converted files' page headings. |
+| `table.ts`, `tableChip.ts` | The table editor's model: parse, edit, align, sort, paste from spreadsheets, write tidy Markdown. |
+| `mindmap.ts`, `flowchart.ts` | The heading tree, offline cards (key idea, keywords, 2-sentence summary), saved map state (`<name>.mindmap.json`), and flowcharts from numbered steps. |
+| `study.ts` | Studying from the mind map: Q&A cards (offline or AI), a quiz that remembers what you knew, highlights as cards, tags and search, Anki and CSV export. Kept in the same saved map state. |
+| `mermaidView.ts` | Draws ```` ```mermaid ```` blocks in the viewer (lazy-loaded, strict mode) and puts the drawings into printed/exported HTML. |
+| `versions.ts` | Version history: a gzip snapshot per save in IndexedDB, identical saves skipped, autosaves at most every 10 minutes, 50 per document. |
+| `aiTools.ts` | Distil a book, remove repeated paragraphs (offline similarity, AI to combine overlaps), crawl a website (robots.txt, polite, up to 100 pages) and write a project guide from a folder. One modest request at a time, so local models and free keys cope. |
+| `analytics.ts` | Anonymous usage counts (PostHog EU), off switch, nothing without a key. |
+
 ---
 
 ### Saving: AutoSave and recovery
@@ -299,7 +316,9 @@ load a blank page).
   Stored with an `enc:v1:` prefix so the format can change later.
 - **Keys never leave the main process.** `ai:keyState` reports presence;
   `ai:setKey` writes. There is no channel that returns a key.
-- **CSP** blocks network access from the renderer entirely.
+- **CSP** blocks network access from the renderer except the model hosts
+  (Hugging Face) and the usage-statistics host (PostHog, EU); see the 1.3
+  table below.
 - **`file:` URLs** are admitted for images only — `lib/markdown.ts` opens
   markdown-it's `validateLink` and DOMPurify's URI allow-list for them, and a
   sanitiser hook strips `href` from `file:` anchors, because clicking one would
@@ -321,6 +340,21 @@ load a blank page).
   prototype-pollution and ReDoS advisories of 0.18.x).
 - **Compare and annotation import** treat file content as data: notes are
   attribute-escaped, other-window text crosses as JSON, reports escape HTML.
+
+### Added in 1.3 (reviewed November 2026)
+
+| Area | What it can reach | How it is limited |
+| --- | --- | --- |
+| **Microphone** (dictation) | Audio only | The permission handlers allow `media` only when every requested type is `audio`; a request that includes video is refused. Speech is recognised on the device (Whisper in a worker); no audio leaves the machine. |
+| **Model downloads** (natural voice, dictation) | `huggingface.co`, `*.huggingface.co`, `*.hf.co` | The only hosts in the CSP's `connect-src` besides the app itself and PostHog. Files are model weights fetched by transformers.js and cached by the browser engine; nothing about the user is sent. |
+| **Audiobooks** (read aloud) | One audio file per document | Served through the `mn-audio://book/?id=<token>` scheme. A token is issued by the main process only for a file found beside the document (same name) or linked by the reader with a file dialog; the page can never name a path. Range requests only; CSP `media-src 'self' blob: mn-audio:`. |
+| **Mind map state** | `<name>.mindmap.json` beside the document | The main process works out the name from the document path; the page cannot choose another file. 8 MB cap both ways. |
+| **Mind map pictures, study cards** | Files the reader names in a save dialog | `file:exportImage` writes PNG/SVG only (40 MB cap); study cards go through `file:exportText` (`.csv`, `.txt`). |
+| **Website to documentation** | Any `http(s)` page | Fetched in the main process (`web:fetchPage`): http/https only, text types only, 5 MB and 20 s per page, identifies itself in `User-Agent`, obeys `robots.txt` and waits between pages (lib/aiTools.ts). The HTML is turned into Markdown and sanitised like any document before it is shown. |
+| **Project folder to documentation** | A folder the reader picks | `project:pick` reads text files only from the chosen folder, skipping `node_modules`, `.git`, builds and symlinks; 400 files, 200 KB each, 4 MB in all. |
+| **Version history** | The app's own storage | IndexedDB in the app's data folder, gzip-compressed, 50 versions per document; never written beside the document. |
+| **Anonymous usage statistics** | `eu.i.posthog.com` | Event names and command names only (`lib/analytics.ts`; arguments are never sent, as some are paths). No PostHog script; a random device id; IP discarded by the project. Off switch in Help; nothing is sent without a project key or in development. |
+| **Mermaid diagrams** | Nothing outside the page | Bundled (no CDN), loaded only when a document has a diagram, `securityLevel: 'strict'` (no click handlers, labels sanitised). |
 
 ---
 

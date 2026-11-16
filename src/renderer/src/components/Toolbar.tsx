@@ -94,6 +94,7 @@ export default function Toolbar(props: Props): React.JSX.Element {
       </div>
 
       <div className="tb-group">
+        {btn('insert:toc', '📑', 'Table of contents: create one at the top of the document, or update it')}
         {btn('view:sidebar:outline', '☰', 'Outline (Ctrl+Shift+O)', sidebar === 'outline' ? 'on' : '')}
         {btn('view:sidebar:comments', '💬', 'Annotations (Ctrl+Shift+C)', sidebar === 'comments' ? 'on' : '')}
         {btn('edit:find', '🔍', 'Find (Ctrl+F)')}

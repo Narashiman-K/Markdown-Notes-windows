@@ -677,11 +677,19 @@ function registerIpc(): void {
    */
   handle('file:exportText', async (_e, args: { text: string; suggestedName: string; folder?: string; title?: string }) => {
     const json = /\.json$/i.test(args.suggestedName)
+    const csv = /\.csv$/i.test(args.suggestedName)
+    const txt = /\.txt$/i.test(args.suggestedName)
     const r = await dialog.showSaveDialog(currentWindow()!, {
       title: args.title ?? 'Export',
       defaultPath:
         args.folder && existsSync(args.folder) ? join(args.folder, basename(args.suggestedName)) : inLastFolder(args.suggestedName),
-      filters: json ? [{ name: 'Annotations', extensions: ['json'] }] : MD_FILTERS
+      filters: json
+        ? [{ name: 'Annotations', extensions: ['json'] }]
+        : csv
+          ? [{ name: 'Spreadsheet (CSV)', extensions: ['csv'] }]
+          : txt
+            ? [{ name: 'Text (Anki import)', extensions: ['txt'] }]
+            : MD_FILTERS
     })
     if (r.canceled || !r.filePath) return { ok: false, canceled: true }
     rememberFolder(r.filePath)

@@ -147,6 +147,7 @@ export function buildMenu(win: BrowserWindow, send: Send): void {
         { label: 'Image…', click: () => send('insert:image') },
         { label: 'Table', click: () => send('insert:table') },
         { label: 'Table of Contents', click: () => send('insert:toc') },
+        { label: 'Diagram (Mermaid)', click: () => send('insert:diagram') },
         { label: 'Horizontal Rule', click: () => send('insert:hr') }
       ]
     },

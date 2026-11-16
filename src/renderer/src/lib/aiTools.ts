@@ -36,7 +36,7 @@ async function askOk(ask: Ask, system: string, user: string, signal?: AbortSigna
     if (r.ok && r.text?.trim()) return r.text.trim()
     last = r.error ?? 'The AI gave an empty answer.'
     // Free keys answer "too many requests" when hurried: wait and try again.
-    if (!/rate|429|busy|overloaded|timeout|temporar/i.test(last)) break
+    if (!/rate.?limit|429|too many|busy|overloaded|temporar/i.test(last)) break
     await new Promise((res) => setTimeout(res, 4000 * (attempt + 1)))
   }
   throw new Error(last)
@@ -119,7 +119,7 @@ export async function distilBook(
   for (let i = 0; i < chapters.length; i++) {
     const c = chapters[i]
     progress(i, chapters.length, c.title)
-    const body = clip(plainText(c.body))
+    const body = clip(plainText(c.body), 8000)
     let text: string
     try {
       text = unwrap(await askOk(ask, DISTIL_SYSTEM, `Chapter: ${c.title}\n\n${body}`, signal))
