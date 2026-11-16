@@ -74,6 +74,11 @@ md.core.ruler.push('suprasuta_source_lines', (state) => {
  */
 const defaultFence = md.renderer.rules.fence
 md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+  // Mermaid: kept as code inside a block the viewer draws (lib/mermaidView).
+  if (tokens[idx].info.trim().split(/\s+/)[0].toLowerCase() === 'mermaid') {
+    const at = tokens[idx].attrGet('data-line')
+    return `<div class="mn-mermaid"${at ? ` data-line="${at}"` : ''}><pre class="hljs"><code>${md.utils.escapeHtml(tokens[idx].content)}</code></pre></div>\n`
+  }
   const html = defaultFence
     ? defaultFence(tokens, idx, options, env, self)
     : self.renderToken(tokens, idx, options)

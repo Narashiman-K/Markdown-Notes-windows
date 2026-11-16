@@ -297,3 +297,11 @@
 
 /* A table whose header row was turned off: the empty header is not shown. */
 .markdown-body table thead:not(:has(th:not(:empty))) { display: none; }
+
+/* Mermaid diagrams: drawn by the viewer; the code stays for anything not drawn. */
+.mn-mermaid { margin: 1em 0; }
+.mn-mermaid-svg { display: flex; justify-content: center; overflow-x: auto; padding: 0.5em 0; }
+.mn-mermaid-svg svg { max-width: 100%; height: auto; }
+.mn-mermaid[data-drawn='yes'] > pre { display: none; }
+.mn-mermaid[data-drawn='error'] > pre { border-left: 3px solid #d9822b; }
+@media print { .mn-mermaid-svg { break-inside: avoid; } }

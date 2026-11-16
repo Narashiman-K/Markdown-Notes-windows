@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { analyticsAvailable, analyticsOn } from '../lib/analytics'
 import { REPO_URL, STORE_URL, featureRequestUrl } from '../../../shared/brand'
 
 /**
@@ -94,6 +95,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
         { separator: true, label: '' },
         { label: 'Save', action: 'file:save', accelerator: 'Ctrl+S' },
         { label: 'Save as…', action: 'file:saveAs', accelerator: 'Ctrl+Shift+S' },
+        { label: 'Version history…', action: 'file:versions' },
         { label: 'AutoSave every 30 seconds', action: 'file:autosave', checked: autosave },
         { separator: true, label: '' },
         { label: 'Export as HTML…', action: 'file:export:html' },
@@ -240,7 +242,12 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
         { label: 'Summarise', action: 'ai:quick:summarise' },
         { label: 'Compare loaded documents (AI)', action: 'ai:quick:compare' },
         { label: 'Explain selection', action: 'ai:quick:explain' },
-        { label: 'Suggest annotations', action: 'ai:quick:annotate' }
+        { label: 'Suggest annotations', action: 'ai:quick:annotate' },
+        { separator: true, label: '' },
+        { label: 'Distil this book…', action: 'ai:tool:distil' },
+        { label: 'Remove repeated content…', action: 'ai:tool:dedupe' },
+        { label: 'Website to documentation…', action: 'ai:tool:site' },
+        { label: 'Project folder to documentation…', action: 'ai:tool:project' }
       ]
     },
     {
@@ -253,6 +260,7 @@ function menus(recentFiles: string[], theme: Props['theme'], pageView: boolean, 
         { label: 'Privacy policy', href: `${REPO_URL}/blob/main/docs/privacy.md` },
         { label: 'Rate it in the Store', href: STORE_URL },
         { separator: true, label: '' },
+        { label: 'Send anonymous usage statistics', action: 'help:analytics', checked: analyticsAvailable() && analyticsOn() },
         { label: 'About', action: 'help:about' }
       ]
     }

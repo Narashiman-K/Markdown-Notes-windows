@@ -745,6 +745,93 @@ function registerIpc(): void {
     }
   })
 
+  /*
+   * AI → Website to documentation: one web page, read here because a page
+   * inside the app may not read other sites. http(s) only, text only, 5 MB
+   * at most, 20 seconds at most, and it says who it is.
+   */
+  handle('web:fetchPage', async (_e, url: string) => {
+    let u: URL
+    try {
+      u = new URL(String(url))
+    } catch {
+      return { ok: false, error: 'That is not a web address.' }
+    }
+    if (!/^https?:$/.test(u.protocol)) return { ok: false, error: 'Only http and https addresses can be read.' }
+    try {
+      const r = await fetch(u, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(20_000),
+        headers: { 'User-Agent': `SuprasutaMarkdownNotes/${app.getVersion()} (documentation reader)`, Accept: 'text/html,text/plain;q=0.9,*/*;q=0.1' }
+      })
+      const type = r.headers.get('content-type') ?? ''
+      if (!r.ok) return { ok: false, error: `The site answered ${r.status}.` }
+      if (type && !/text\/|html|xml/i.test(type)) return { ok: false, error: 'Not a web page.', type }
+      const len = Number(r.headers.get('content-length') ?? 0)
+      if (len > 5 * 1024 * 1024) return { ok: false, error: 'The page is too large.' }
+      const text = await r.text()
+      if (text.length > 5 * 1024 * 1024) return { ok: false, error: 'The page is too large.' }
+      return { ok: true, html: text, url: r.url || u.toString(), type }
+    } catch (err) {
+      return { ok: false, error: String((err as Error).message ?? err) }
+    }
+  })
+
+  /*
+   * AI → Project folder to documentation: the reader picks a folder, and its
+   * text files are read here (generated folders such as node_modules and .git
+   * skipped; at most 400 files, 200 KB each, 4 MB in all).
+   */
+  handle('project:pick', async () => {
+    const r = await dialog.showOpenDialog(currentWindow()!, {
+      title: 'Choose the project folder',
+      defaultPath: lastFolder(),
+      properties: ['openDirectory']
+    })
+    if (r.canceled || !r.filePaths[0]) return null
+    const root = r.filePaths[0]
+    const skipDir = /^(node_modules|\.git|\.hg|\.svn|dist|build|out|target|bin|obj|\.next|\.nuxt|\.venv|venv|__pycache__|\.idea|\.vscode|coverage|vendor|release|\.cache)$/i
+    const textFile = /\.(md|txt|rst|json|ya?ml|toml|ini|cfg|xml|html?|css|scss|less|js|jsx|mjs|cjs|ts|tsx|vue|svelte|py|rb|php|java|kt|kts|scala|go|rs|c|h|cc|cpp|hpp|cs|fs|swift|m|mm|sh|ps1|bat|cmd|sql|graphql|proto|gradle|r|lua|dart|ex|exs|erl|clj|hs|ml|pl|tf)$|^(dockerfile|makefile|license|readme)$/i
+    const files: Array<{ path: string; text: string }> = []
+    let skipped = 0
+    let total = 0
+    let visited = 0
+    const walkDir = async (dir: string, rel: string): Promise<void> => {
+      if (++visited > 5000) return
+      let entries: import('node:fs').Dirent[]
+      try {
+        entries = await fsp.readdir(dir, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const ent of entries) {
+        const path = rel ? `${rel}/${ent.name}` : ent.name
+        const full = join(dir, ent.name)
+        if (ent.isSymbolicLink()) continue
+        if (ent.isDirectory()) {
+          if (!skipDir.test(ent.name)) await walkDir(full, path)
+          continue
+        }
+        if (!ent.isFile() || !textFile.test(ent.name)) continue
+        try {
+          const st = await fsp.stat(full)
+          if (files.length >= 400 || st.size > 200_000 || total + st.size > 4_000_000) {
+            skipped++
+            continue
+          }
+          const text = await fsp.readFile(full, 'utf8')
+          if (text.includes('\u0000')) continue
+          total += st.size
+          files.push({ path, text })
+        } catch {
+          skipped++
+        }
+      }
+    }
+    await walkDir(root, '')
+    return { name: basename(root), files, skipped }
+  })
+
   handle('dialog:pickAnnotations', async (_e, opts?: { folder?: string }) => {
     const r = await dialog.showOpenDialog(currentWindow()!, {
       title: 'Load annotations',

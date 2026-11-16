@@ -36,6 +36,7 @@ export function buildMenu(win: BrowserWindow, send: Send): void {
         { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => send('file:save') },
         { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => send('file:saveAs') },
+        { label: 'Version history…', click: () => send('file:versions') },
         {
           label: 'Export',
           submenu: [
@@ -182,6 +183,11 @@ export function buildMenu(win: BrowserWindow, send: Send): void {
         { label: 'Explain Selection', click: () => send('ai:quick:explain') },
         { label: 'Suggest Annotations', click: () => send('ai:quick:annotate') },
         { type: 'separator' },
+        { label: 'Distil This Book…', click: () => send('ai:tool:distil') },
+        { label: 'Remove Repeated Content…', click: () => send('ai:tool:dedupe') },
+        { label: 'Website to Documentation…', click: () => send('ai:tool:site') },
+        { label: 'Project Folder to Documentation…', click: () => send('ai:tool:project') },
+        { type: 'separator' },
         {
           label: 'Coming soon: documentation from a code project…',
           click: () => send('help:featureVote')
@@ -197,6 +203,7 @@ export function buildMenu(win: BrowserWindow, send: Send): void {
         { label: 'Request a Feature or Report a Problem', click: () => send('help:featureVote') },
         { label: 'Project on GitHub', click: () => shell.openExternal('https://github.com/Narashiman-K/Markdown-Notes-windows') },
         { type: 'separator' },
+        { label: 'Send Anonymous Usage Statistics…', click: () => send('help:analytics') },
         { label: `About ${app.getName()}`, click: () => send('help:about') }
       ]
     }

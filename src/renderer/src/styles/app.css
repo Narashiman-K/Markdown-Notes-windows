@@ -1800,3 +1800,25 @@ html[data-theme='dark'] { --backlit-halo: rgba(255, 150, 60, 0.26); }
 .modal.mm-edit { max-height: 90vh; overflow: auto; }
 .read-speed-box { display: inline-flex; flex-direction: column; align-items: center; line-height: 1; }
 .read-speed-value { font-size: 10.5px; color: var(--muted); margin-bottom: 1px; }
+
+/* Version history */
+.versions-modal { width: min(860px, 94vw); }
+.versions-body { display: flex; gap: 12px; height: min(56vh, 520px); margin: 8px 0; }
+.versions-list { list-style: none; margin: 0; padding: 0; width: 220px; overflow-y: auto; flex: none; }
+.versions-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 6px 8px; border-radius: 6px; background: transparent; border: 1px solid transparent; color: inherit; }
+.versions-list button > span:first-child { font-weight: 600; }
+.versions-list button.active { border-color: #e8833a; box-shadow: 0 0 8px rgba(232, 131, 58, 0.45); }
+.versions-preview { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.versions-preview pre { flex: 1; margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; padding: 8px; border-radius: 6px; background: rgba(127, 127, 127, 0.08); }
+.versions-note { min-height: 1.4em; margin-bottom: 4px; }
+button.danger { color: #d13438; }
+
+/* AI tools */
+.aitools-modal { width: min(600px, 94vw); }
+.aitools-field { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.aitools-field input { padding: 7px 9px; font-size: 14px; }
+.aitools-warn { color: #d9822b; }
+.aitools-progress { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.aitools-progress .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aitools-bar { height: 6px; border-radius: 3px; background: rgba(127, 127, 127, 0.2); overflow: hidden; }
+.aitools-bar span { display: block; height: 100%; background: #e8833a; box-shadow: 0 0 8px rgba(232, 131, 58, 0.6); transition: width 0.3s; }

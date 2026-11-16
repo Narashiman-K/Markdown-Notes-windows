@@ -20,6 +20,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { renderMarkdown } from '../lib/markdown'
+import { drawMermaid } from '../lib/mermaidView'
 import { buildSourceMap, rangeToOffsets, toSourceRange, trimRange } from '../lib/align'
 import type { Table } from '../lib/table'
 import TableTools from './TableTools'
@@ -68,6 +69,10 @@ export default function LivePreview({
   const [bar, setBar] = useState<{ x: number; y: number; flip: boolean } | null>(null)
 
   const html = useMemo(() => renderMarkdown(source, { sourceLines: true, screen: true }), [source])
+
+  useEffect(() => {
+    if (bodyRef.current && html.includes('mn-mermaid')) void drawMermaid(bodyRef.current)
+  }, [html])
 
   // Announce the elements once they exist, and withdraw them on unmount so no
   // listener is left attached to a node that is no longer on the page.

@@ -76,7 +76,7 @@ Choose where it runs:
 
 PRIVACY BY DEFAULT
 • Your documents, annotations and settings never leave your computer
-• No analytics, no telemetry, no advertising, no account required
+• No advertising, no account required; only anonymous usage counts, with an off switch
 • Cloud features are switched off until you turn them on with your own API key, and each one states plainly where your data goes
 • API keys are encrypted with Windows DPAPI and are readable only by your Windows account on your machine
 • Open source — every claim above can be verified in the code
@@ -199,7 +199,7 @@ Likewise, image OCR in cloud mode and audio transcription require a user-supplie
 
 PRIVACY
 
-The app collects no data, has no analytics and no server. Cloud features are off by default and each displays what is sent and where before it is used.
+The app has no server and never sends your documents. It sends anonymous usage counts (feature names only, no content, no IP address) to PostHog in the EU, switchable off under Help. Cloud features are off by default and each displays what is sent and where before it is used.
 ```
 
 ---
@@ -231,7 +231,7 @@ Full trust is used for the following, each initiated by the user:
 
 5. A local HTTP connection to 127.0.0.1:11434, if the user chooses to run the optional AI assistant locally via Ollama. This never leaves the machine.
 
-The application does not require elevation, does not install services or drivers, does not modify system settings, does not write outside its own application storage and folders the user selects, and does not run in the background after being closed. It collects no telemetry and contains no advertising.
+The application does not require elevation, does not install services or drivers, does not modify system settings, does not write outside its own application storage and folders the user selects, and does not run in the background after being closed. It contains no advertising; its only telemetry is anonymous feature-usage counts, which the user can switch off.
 
 The full source code is public and can be reviewed at:
 https://github.com/Narashiman-K/Markdown-Notes-windows

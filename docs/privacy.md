@@ -1,4 +1,4 @@
----
+﻿---
 title: Privacy Policy
 ---
 
@@ -6,15 +6,18 @@ title: Privacy Policy
 
 **Suprasūtā Markdown Notes**
 
-Last updated: 20 August 2026
+Last updated: 16 November 2026
 
 ---
 
 ## The short version
 
 This application stores everything on your own computer. It does not collect,
-transmit or sell your personal information. There is no analytics, no telemetry
-and no advertising.
+transmit or sell your personal information, and there is no advertising.
+
+The only thing it sends by itself is **anonymous usage counts**: which features
+are used, never what you write. Switch it off at any time under
+**Help → Send anonymous usage statistics**. Details below.
 
 Three optional features can send data to a third party, but **only** if you
 switch them on and supply your own credentials. Each is described below.
@@ -51,9 +54,30 @@ never leave your machine except to the provider you chose.
 
 ## What the publisher receives
 
-**Nothing.** The application has no server, no account system and no analytics.
-The publisher cannot see your documents, your settings, your API keys, whether
-you use the app, or that you have installed it at all.
+**Only anonymous usage counts, and only while they are switched on.** The
+application has no server and no account system. The publisher cannot see your
+documents, your settings or your API keys.
+
+### Anonymous usage statistics
+
+On by default; switch off under **Help → Send anonymous usage statistics**.
+When off, nothing is sent.
+
+| Sent | Never sent |
+| --- | --- |
+| That the app was opened, the app version, Windows app or web, a rough screen size, the interface language, and the names of commands used (such as “Save” or “Mind map”) | Document text, file or folder names, notes and highlights, AI questions or answers, API keys, your name, e-mail or IP address |
+
+The counts go to **PostHog**, hosted in the European Union, under a project set
+to discard IP addresses. A device is identified only by a random number created
+on it, not linked to any account or person. No PostHog code runs in the app; it
+sends the counts itself. The legal basis is the publisher's legitimate interest
+in improving the app, balanced by the data being anonymous and the off switch.
+
+### Model downloads
+
+Read aloud and dictation run on your computer. The first time you use them, the
+app downloads their models from **Hugging Face**. That is an ordinary file
+download; nothing you write or say is sent.
 
 If you contact the publisher, or open an issue on the project's GitHub page, you
 share whatever information you choose to include in that message. That is

@@ -22,6 +22,10 @@ import {
 } from './lib/annotationTransfer'
 import AiPanel from './components/AiPanel'
 import DiffDialog from './components/DiffDialog'
+import { analyticsAvailable, analyticsNoticeDue, analyticsOn, commandName, setAnalytics, startAnalytics, track } from './lib/analytics'
+import VersionsDialog from './components/VersionsDialog'
+import AiToolsDialog, { type AiTool } from './components/AiToolsDialog'
+import { pathKey, snapshot } from './lib/versions'
 import { installSignature, signatureComment } from './lib/signature'
 import { findQuoteRange, type AiMode } from './lib/aiPrompts'
 import { featureRequestUrl } from '../../shared/brand'
@@ -65,6 +69,7 @@ import {
   type ReaderSettings
 } from './lib/reader'
 import { ZOOM_LEVELS, type AnnotationType } from '../../shared/types'
+import { withDiagrams } from './lib/mermaidView'
 import markdownCss from './styles/markdown.css?inline'
 import hljsCss from 'highlight.js/styles/github.css?inline'
 
@@ -190,6 +195,8 @@ export default function App(): React.JSX.Element {
   const [cursor, setCursor] = useState({ line: 1, col: 1 })
   const [toast, setToast] = useState<string | null>(null)
   const [showAbout, setShowAbout] = useState(false)
+  const [showVersions, setShowVersions] = useState(false)
+  const [aiTool, setAiTool] = useState<AiTool | null>(null)
   const [convertSeed, setConvertSeed] = useState<string[] | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
   const [compareOpen, setCompareOpen] = useState(false)
@@ -674,6 +681,7 @@ export default function App(): React.JSX.Element {
       if (r.ok && r.filePath) {
         setFilePath(r.filePath)
         setDirty(false)
+        void snapshot(pathKey(r.filePath), text, purpose === 'autosave')
         const base = await window.api.basename(r.filePath)
         setFileName(base)
         // Stay where you are. Saving used to switch to View mode, so after
@@ -711,7 +719,7 @@ export default function App(): React.JSX.Element {
       standaloneHtml(
         fileName,
         // Printed and exported as shown: without the page pictures while they are hidden.
-        renderMarkdown(content, { hideScans: !showScans }),
+        withDiagrams(renderMarkdown(content, { hideScans: !showScans })),
         `${markdownCss}\n${hljsCss}`,
         forPrint,
         readPageSize(content)
@@ -954,6 +962,13 @@ export default function App(): React.JSX.Element {
 
   const handleAction = useCallback(
     async (action: string, payload?: unknown) => {
+      // Usage counts: the command's name only, never its argument.
+      const cmd = commandName(action)
+      if (cmd) track('command', { name: cmd })
+      if (action.startsWith('ai:tool:')) {
+        setAiTool(action.slice(8) as AiTool)
+        return
+      }
       switch (action) {
         case 'file:new':
           return doNew()
@@ -998,6 +1013,9 @@ export default function App(): React.JSX.Element {
           return
         case 'file:compare':
           setCompareOpen(true)
+          return
+        case 'file:versions':
+          setShowVersions(true)
           return
         case 'view:mindmap':
           setMindBack(false)
@@ -1356,6 +1374,16 @@ export default function App(): React.JSX.Element {
         case 'help:about':
           setShowAbout(true)
           return
+        case 'help:analytics': {
+          if (!analyticsAvailable()) {
+            flash('Usage statistics are not set up in this build: nothing is sent.')
+            return
+          }
+          const next = !analyticsOn()
+          setAnalytics(next)
+          flash(next ? 'Anonymous usage statistics on. Nothing you write is ever sent.' : 'Usage statistics off: nothing is sent.')
+          return
+        }
         case 'help:featureVote':
           window.open(featureRequestUrl(), '_blank')
           flash('Opening GitHub — your vote helps decide what gets built next.')
@@ -1422,6 +1450,32 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   actionRef.current = handleAction
+
+  // The AI tools' link to whichever AI is set up in the AI panel.
+  const aiBridge = useMemo(
+    () => ({
+      status: async () => {
+        const s = await window.api.getSettings()
+        return window.api.aiStatus(s?.aiProvider ?? 'ollama')
+      },
+      ask: async (system: string, user: string) => {
+        const s = await window.api.getSettings()
+        const provider = (s?.aiProvider ?? 'ollama') as ProviderId
+        let model: string = s?.aiModel ?? ''
+        if (!model) model = (await window.api.aiModels(provider))?.models?.[0] ?? ''
+        return window.api.aiChat({ provider, model, system, messages: [{ role: 'user', content: user }], temperature: 0.2, maxTokens: 2000 })
+      }
+    }),
+    []
+  )
+
+  // Anonymous usage statistics (see lib/analytics.ts), with a one-time notice.
+  useEffect(() => {
+    startAnalytics('windows', __APP_VERSION__)
+    if (analyticsNoticeDue())
+      flash('Anonymous usage counts help improve the app; nothing you write is sent. Turn off: Help → Send anonymous usage statistics.')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /* ------------------------------------------------------------- effects */
 
@@ -1981,6 +2035,46 @@ export default function App(): React.JSX.Element {
       )}
 
       {showAbout && <AboutDialog onClose={() => setShowAbout(false)} />}
+
+      {aiTool && (
+        <AiToolsDialog
+          key={aiTool}
+          tool={aiTool}
+          source={content}
+          fileName={fileName}
+          ai={aiBridge}
+          fetchPage={(url) => window.api.fetchPage(url)}
+          pickProject={() => window.api.pickProject()}
+          anySite
+          onClose={() => setAiTool(null)}
+          onReview={(text, label) => {
+            setAiTool(null)
+            setPendingDiff({ next: text, label })
+          }}
+          onOpenNew={async (text, name) => {
+            setAiTool(null)
+            if (!(await guardUnsaved())) return
+            loadDocument(null, refreshToc(text))
+            setFileName(name)
+            setDirty(true)
+            setMode('view')
+            flash(`${name} is ready. Save it to keep it.`)
+          }}
+        />
+      )}
+
+      {showVersions && (
+        <VersionsDialog
+          docKey={filePath ? pathKey(filePath) : null}
+          fileName={fileName}
+          current={content}
+          onClose={() => setShowVersions(false)}
+          onRestore={(text, at) => {
+            setShowVersions(false)
+            setPendingDiff({ next: text, label: `Version from ${at}` })
+          }}
+        />
+      )}
 
       {pendingDiff && (
         <DiffDialog

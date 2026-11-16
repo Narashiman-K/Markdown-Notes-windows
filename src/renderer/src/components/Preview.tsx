@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { renderMarkdown } from '../lib/markdown'
+import { drawMermaid } from '../lib/mermaidView'
 import { readPageSize, sheetStyle } from '../lib/pages'
 import { buildSourceMap, indexTextNodes, domToOffset, toSourceRange, type TextNodeIndexEntry } from '../lib/align'
 import { HIGHLIGHT_COLORS } from '../lib/annotations'
@@ -74,6 +75,11 @@ const Preview = forwardRef<PreviewHandle, Props>(function Preview(props, ref) {
     mapRef.current = buildSourceMap(source, indexRef.current.text)
     setToolbar((t) => ({ ...t, visible: false }))
   }, [html, source])
+
+  // Draw Mermaid diagrams (loaded only when the document has one).
+  useEffect(() => {
+    if (hostRef.current && html.includes('mn-mermaid')) void drawMermaid(hostRef.current)
+  }, [html])
 
   const getSelectionRange = useCallback((): [number, number] | null => {
     const sel = window.getSelection()
