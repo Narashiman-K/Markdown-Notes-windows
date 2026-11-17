@@ -22,6 +22,7 @@ import {
 } from '../lib/speech/readAloud'
 import { NaturalVoice, NATURAL_VOICES, NATURAL_MODEL_MB, NATURAL_VOICES_READY } from '../lib/speech/naturalVoice'
 import { AudiobookPlayer, parseSidecar } from '../lib/speech/audiobook'
+import { BASE_WPM, Pace } from '../lib/speech/pace'
 
 interface Props {
   options: ReadOptions
@@ -74,6 +75,22 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
   const player = useRef<ReadAloud | null>(null)
   const natural = useRef<NaturalVoice | null>(null)
   const sleepTimer = useRef<number | null>(null)
+  // Words per minute, measured from the sentences as they are read (lib/speech/pace.ts).
+  const pace = useRef(new Pace())
+  const [wpm, setWpm] = useState<number | null>(null)
+  // Pausing, stopping or a new speed: measure afresh.
+  useEffect(() => {
+    if (state !== 'playing') pace.current.reset()
+  }, [state])
+  useEffect(() => {
+    pace.current.reset()
+    setWpm(null)
+  }, [options.rate, options.style])
+  const onSentence = (i: number, n: number): void => {
+    setPos({ i, n })
+    pace.current.at(i)
+    setWpm(pace.current.wpm())
+  }
 
   if (!player.current) {
     natural.current = new NaturalVoice({
@@ -83,7 +100,7 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
       options,
       {
         onState: setState,
-        onSentence: (i, n) => setPos({ i, n }),
+        onSentence: (i, n) => onSentence(i, n),
         onNote: setNote,
         onPreparing: setPreparing
       },
@@ -131,7 +148,7 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
     book.current = audiobook?.url
       ? new AudiobookPlayer(audiobook.url, parseSidecar(audiobook.sidecar), {
           onState: setState,
-          onSentence: (i, n) => setPos({ i, n }),
+          onSentence: (i, n) => onSentence(i, n),
           onNote: setNote
         })
       : null
@@ -151,6 +168,7 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
     const b = book.current
     if (!b) return
     player.current?.stop()
+    pace.current.setSentences(sentences.map((s) => s.spoken || s.text))
     const { matched, total } = b.setDocument(sentences, scroller)
     if (!audiobook?.sidecar) setNote(`Playing ${audiobook?.name}: no Book2Audio timing file (.b2a.json) beside it, so the text is not highlighted.`)
     else if (!matched) setNote('The audiobook’s timing file does not match this document’s text, so the text is not highlighted.')
@@ -200,6 +218,7 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
       startBook(all, Math.max(0, at), scroller)
       return
     }
+    pace.current.setSentences(sentences.map((s) => s.spoken || s.text))
     player.current!.load(sentences, from, scroller)
     player.current!.play()
   }
@@ -227,6 +246,7 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
       natural.current?.unlock()
       setNote('')
       if (useBook) return startBook(sentences, at, scroller)
+      pace.current.setSentences(sentences.map((s) => s.spoken || s.text))
       player.current!.load(sentences, at, scroller)
       player.current!.play()
     }
@@ -373,7 +393,19 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
         <label className="read-inline read-speed" title="Speed (double-click a sentence to start there)">
           <span>Speed</span>
           <span className="read-speed-box">
-            <span className="read-speed-value">{(useBook ? options.rate : options.rate * style.rate).toFixed(2)}×</span>
+            <span
+              className="read-speed-value"
+              title={
+                wpm !== null && state === 'playing'
+                  ? 'Words per minute, measured from the reading so far (the last minute)'
+                  : 'Words per minute: an estimate until a few sentences have been read'
+              }
+            >
+              {(useBook ? options.rate : options.rate * style.rate).toFixed(2)}× ·{' '}
+              {wpm !== null && state === 'playing'
+                ? `${wpm} wpm`
+                : `≈${Math.round(BASE_WPM * (useBook ? options.rate : options.rate * style.rate))} wpm`}
+            </span>
             <input type="range" min={0.5} max={2.5} step={0.05} value={options.rate} onChange={(e) => set({ rate: Number(e.target.value) })} />
           </span>
         </label>
