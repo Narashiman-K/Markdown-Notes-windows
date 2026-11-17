@@ -683,6 +683,7 @@ export default function MindMapView(props: Props): React.JSX.Element {
       if (linking) setLinking(null)
       else if (editing) setEditing(null)
       else if (peek) setPeek(null)
+      else if (kind === 'flow') setKind('map')
       else if (focusNode) {
         const up = parentOf(focusNode.id)
         props.onFocus(up && up.kind !== 'doc' ? up.id : null)
@@ -691,7 +692,7 @@ export default function MindMapView(props: Props): React.JSX.Element {
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [editing, peek, props, linking])
+  }, [editing, peek, props, linking, kind])
 
   /* -------------------------------------------------------- navigation */
   const chapters = tree.children
@@ -720,6 +721,8 @@ export default function MindMapView(props: Props): React.JSX.Element {
             <button
               className="mm-back-btn"
               onClick={() => {
+                // From a flowchart, Back returns to this part's mind map first.
+                if (kind === 'flow') return setKind('map')
                 const up = parentOf(focusNode.id)
                 props.onFocus(up && up.kind !== 'doc' ? up.id : null)
               }}
@@ -728,7 +731,7 @@ export default function MindMapView(props: Props): React.JSX.Element {
               ← Back
             </button>
           )}
-          <button className={!focusNode ? 'on' : ''} onClick={() => props.onFocus(null)} title="The first page: the whole book and its chapters">
+          <button className={!focusNode && kind === 'map' ? 'on' : ''} onClick={() => (setKind('map'), props.onFocus(null))} title="The first page: the whole book and its chapters">
             ⌂ Book
           </button>
           {focusNode &&

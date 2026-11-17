@@ -85,6 +85,19 @@ describe('paragraph styles', () => {
     const { restyle } = await import('../src/renderer/src/lib/docBlocks')
     expect(restyle('- a\n- b\n- c', 'indent', 1)).toBe('- a\n  - b\n- c')
     expect(restyle('- a\n  - b\n- c', 'outdent', 1)).toBe('- a\n- b\n- c')
+    // Never deeper than one level under the item above, and the first item stays.
+    expect(restyle('- a\n  - b', 'indent', 1)).toBe('- a\n  - b')
+    expect(restyle('- a\n- b', 'indent', 0)).toBe('- a\n- b')
+    expect(restyle('1. a\n2. b', 'indent', 1)).toBe('1. a\n   2. b')
+  })
+  it('indents a paragraph with a first-line indent, never as code', async () => {
+    const { restyle } = await import('../src/renderer/src/lib/docBlocks')
+    expect(restyle('Hello', 'indent')).toBe('\u2003\u2003Hello')
+    expect(restyle('\u2003\u2003Hello', 'outdent')).toBe('Hello')
+    const { blockToMarkdown } = await import('../src/renderer/src/lib/docBlocks')
+    expect(blockToMarkdown('<p>\u2003\u2003Hello</p>')).toBe('\u2003\u2003Hello')
+    const { renderMarkdown } = await import('../src/renderer/src/lib/markdown')
+    expect(renderMarkdown('\u2003\u2003Hello')).not.toContain('<code>')
   })
   it('writes strikethrough with two tildes', async () => {
     const { blockToMarkdown } = await import('../src/renderer/src/lib/docBlocks')

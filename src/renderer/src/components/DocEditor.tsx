@@ -25,6 +25,8 @@ import { drawMermaid } from '../lib/mermaidView'
 import { normaliseUrl } from '../lib/links'
 import { EDITABLE, TEMPLATES, blockToMarkdown, insertAfter, replaceBlock, restyle, splitBlocks, type DocBlock, type Style } from '../lib/docBlocks'
 import DiagramDialog from './DiagramDialog'
+import TableTools from './TableTools'
+import type { Table } from '../lib/table'
 
 export interface DocEditorHandle {
   /** The line new things go after: the end of the block being edited, or the document's end. */
@@ -33,6 +35,10 @@ export interface DocEditorHandle {
   commit: () => void
   /** Typing not yet saved into the document. */
   pending: () => boolean
+  /** Stops writing in the paragraph, so the page redraws from the document (undo, redo). */
+  release: () => void
+  /** The app's Insert menu (insert:h1, insert:table…) in the Doc Editor; false when not handled here. */
+  run: (action: string) => boolean
   /** Types text where the caret is (dictation); false when no paragraph has the caret. */
   insertText: (text: string) => boolean
 }
@@ -45,6 +51,10 @@ interface Props {
   onTableEdit: (line: number) => void
   /** Inserts a picture after the block being edited (the app's own picker). */
   onInsertImage: () => void
+  /** Changes a table in place (the hover buttons and cell editing). */
+  onTableChange?: (line: number, change: (t: Table) => Table, label: string) => void
+  /** Brings the table of contents up to date. */
+  onUpdateToc?: () => void
 }
 
 const LOCK_HINT: Partial<Record<DocBlock['kind'], string>> = {
@@ -58,7 +68,22 @@ const LOCK_HINT: Partial<Record<DocBlock['kind'], string>> = {
   image: 'Picture: kept as it is. Edit mode changes its file or text.'
 }
 
-type MenuItem = { label: string; keys?: string; run: () => void } | 'sep'
+const KIND_NAME: Record<DocBlock['kind'], string> = {
+  text: 'paragraph',
+  heading: 'heading',
+  list: 'list',
+  quote: 'quote',
+  code: 'code block',
+  mermaid: 'diagram',
+  table: 'table',
+  toc: 'table of contents',
+  page: 'page note',
+  rule: 'dividing line',
+  html: 'block',
+  image: 'picture'
+}
+
+type MenuItem ={ label: string; keys?: string; run: () => void } | 'sep'
 
 const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, ref) {
   const { source, onChange } = props
@@ -78,20 +103,33 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
   const typing = useRef<number | null>(null)
   useEffect(() => () => void (typing.current && window.clearTimeout(typing.current)), [])
   const host = useRef<HTMLDivElement>(null)
+  const bodyRef = useRef<HTMLElement>(null)
   const dirty = useRef(false)
   const saved = useRef<Range | null>(null)
   const refocus = useRef<number | null>(null)
   const [focused, setFocused] = useState<number | null>(null)
   const [linkBox, setLinkBox] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
-  const [codeEdit, setCodeEdit] = useState<{ block: DocBlock; lang: string; code: string } | null>(null)
+  const [codeEdit, setCodeEdit] = useState<{ block: DocBlock; lang: string; code: string; after?: DocBlock | null } | null>(null)
   const [diagram, setDiagram] = useState(false)
   const sourceRef = useRef(source)
   sourceRef.current = source
   const blocksRef = useRef(blocks)
   blocksRef.current = blocks
 
-  const html = useMemo(() => blocks.map((b) => renderMarkdown(b.text, { screen: true })), [blocks])
+  // Each block on its own; a table keeps the line it starts on in the whole
+  // document, so the table tools (hover buttons, cell editing) find it.
+  const html = useMemo(
+    () =>
+      blocks.map((b) => {
+        const out = renderMarkdown(b.text, { screen: true })
+        return b.kind === 'table' ? out.replace(/data-mn-table="(\d+)"/g, (_m, n: string) => `data-mn-table="${Number(n) + b.start}"`) : out
+      }),
+    [blocks]
+  )
+  const allHtml = useMemo(() => html.join(''), [html])
+  /** The link right-clicked (for Edit link and Remove link). */
+  const linkEl = useRef<HTMLAnchorElement | null>(null)
   // Keys from the text, so a block keeps its place (and the caret) when lines above it change.
   const keys = useMemo(() => {
     const seen = new Map<string, number>()
@@ -137,7 +175,7 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
     const b = list[i]
     if (!b) return
     const next = blockToMarkdown(el.innerHTML)
-    if (next === b.text.trim()) return
+    if (next === b.text.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '')) return
     // While typing, an emptied block stays (as one empty line) until it is left.
     if (!next && !leaving) return
     const updated = replaceBlock(sourceRef.current, b, next)
@@ -156,7 +194,15 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
   const typed = (): void => {
     dirty.current = true
     if (typing.current) window.clearTimeout(typing.current)
-    typing.current = window.setTimeout(() => commit(false), 500)
+    typing.current = window.setTimeout(() => {
+      const el = current.current
+      commit(false)
+      // Changed from a menu while nobody is typing in it: redraw from the document.
+      if (el && !el.contains(document.activeElement)) {
+        current.current = null
+        setBlocks(splitBlocks(sourceRef.current))
+      }
+    }, 500)
   }
 
   const blockOf = (el: HTMLElement | null): DocBlock | null => (el?.dataset.block ? (blocksRef.current[Number(el.dataset.block)] ?? null) : null)
@@ -184,6 +230,36 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
     insertLine: () => currentBlock()?.end ?? null,
     commit: () => commit(false),
     pending: () => dirty.current,
+    run: (action: string) => {
+      const map: Record<string, () => void> = {
+        'insert:bold': () => exec('bold'),
+        'insert:italic': () => exec('italic'),
+        'insert:code': inlineCode,
+        'insert:link': () => (remember(), setLinkBox('')),
+        'insert:h1': () => blockStyle('h1'),
+        'insert:h2': () => blockStyle('h2'),
+        'insert:h3': () => blockStyle('h3'),
+        'insert:ul': () => blockStyle('ul'),
+        'insert:ol': () => blockStyle('ol'),
+        'insert:quote': () => blockStyle('quote'),
+        'insert:task': () => blockStyle('ul'),
+        'insert:codeblock': newCode,
+        'insert:table': newTable,
+        'insert:hr': () => insert(TEMPLATES.rule, 'Insert line')
+      }
+      const fn = map[action]
+      if (!fn) return false
+      fn()
+      return true
+    },
+    release: () => {
+      commit()
+      current.current = null
+      setFocused(null)
+      const active = document.activeElement as HTMLElement | null
+      if (active?.closest('.doc-page')) active.blur()
+      setBlocks(splitBlocks(sourceRef.current))
+    },
     insertText: (text: string) => {
       const el = restore() ?? (last.current?.isConnected ? last.current : null)
       if (!el) return false
@@ -205,9 +281,31 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
     }
   }))
 
+  /**
+   * With nothing selected, formatting applies to the word the caret is in
+   * (as in a word processor), not to an invisible empty spot.
+   */
+  const wordAtCaret = (): void => {
+    const sel = window.getSelection() as (Selection & { modify?: (a: string, d: string, g: string) => void }) | null
+    if (!sel || !sel.isCollapsed || !sel.modify) return
+    const node = sel.anchorNode
+    const text = node?.textContent ?? ''
+    const at = sel.anchorOffset
+    // Only inside a word: letters on at least one side of the caret.
+    if (!/[\p{L}\p{N}]/u.test(text[at - 1] ?? '') && !/[\p{L}\p{N}]/u.test(text[at] ?? '')) return
+    if (/[\p{L}\p{N}]/u.test(text[at - 1] ?? '')) sel.modify('move', 'backward', 'word')
+    sel.modify('extend', 'forward', 'word')
+    // Leave out the space a forward word-step takes with it.
+    const r = sel.getRangeAt(0)
+    const s = r.toString()
+    const trail = s.length - s.trimEnd().length
+    if (trail && r.endContainer.nodeType === 3) r.setEnd(r.endContainer, r.endOffset - trail)
+  }
+
   /** Bold, italic, underline, strikethrough: on the selected words. */
   const exec = (cmd: string): void => {
     if (!restore()) return
+    wordAtCaret()
     document.execCommand(cmd)
     typed()
     remember()
@@ -215,6 +313,7 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
 
   const inlineCode = (): void => {
     if (!restore()) return
+    wordAtCaret()
     const text = window.getSelection()?.toString() || 'code'
     const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     document.execCommand('insertHTML', false, `<code>${esc}</code>`)
@@ -247,6 +346,17 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
   const addLink = (typedUrl: string): void => {
     const url = normaliseUrl(typedUrl)
     setLinkBox(null)
+    // Changing a link that is already there (right-click → Edit link).
+    const existing = linkEl.current
+    linkEl.current = null
+    if (existing?.isConnected) {
+      if (!url) return
+      existing.setAttribute('href', url)
+      current.current = existing.closest<HTMLElement>('[data-block]')
+      last.current = current.current
+      typed()
+      return
+    }
     const el = restore()
     if (!url || !el) return
     const sel = window.getSelection()
@@ -267,16 +377,24 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
     typed()
   }
 
+  /** A whole-document change made here (insert, delete, code): shown at once. */
+  const applyDoc = (updated: string, label: string): void => {
+    current.current = null
+    sourceRef.current = updated
+    setBlocks(splitBlocks(updated))
+    onChange(updated, label)
+  }
+
   /** New Markdown after the block being edited (or at the end). */
   const insert = (block: string, label: string): void => {
     commit()
     const b = currentBlock()
-    onChange(insertAfter(sourceRef.current, b, block), label)
+    applyDoc(insertAfter(sourceRef.current, b, block), label)
   }
   const newCode = (): void => {
     const b = currentBlock()
     commit()
-    setCodeEdit({ block: { kind: 'code', start: b ? b.end : -1, end: b ? b.end : -1, text: '' }, lang: '', code: '' })
+    setCodeEdit({ block: { kind: 'code', start: -1, end: -1, text: '' }, lang: '', code: '', after: b })
   }
   const newTable = (): void => {
     const b = currentBlock()
@@ -316,11 +434,19 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
       e.preventDefault()
       document.execCommand('underline')
       typed()
-    } else if (e.key === 'Tab' && (e.currentTarget.querySelector('li') || e.shiftKey)) {
-      // Tab indents a list item, Shift+Tab brings it back.
+    } else if (e.key === 'Tab') {
       e.preventDefault()
-      remember()
-      blockStyle(e.shiftKey ? 'outdent' : 'indent')
+      const sel = window.getSelection()
+      const inItem = (sel?.anchorNode?.nodeType === 1 ? (sel.anchorNode as Element) : sel?.anchorNode?.parentElement)?.closest('li')
+      if (inItem || e.shiftKey) {
+        // In a list, Tab moves the item in a level and Shift+Tab out.
+        remember()
+        blockStyle(e.shiftKey ? 'outdent' : 'indent')
+      } else {
+        // In a paragraph, Tab leaves a space like a word processor's tab.
+        document.execCommand('insertText', false, '  ')
+        typed()
+      }
     }
   }
 
@@ -362,7 +488,41 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
     </button>
   )
 
+  /** Opens a code block or diagram in the small editing window. */
+  const openCode = (b: DocBlock): void => {
+    const m = b.text.match(/^(\s*)(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)\n\s*\2\s*$/)
+    setCodeEdit({ block: b, lang: m ? m[3].trim() : '', code: m ? m[4] : b.text })
+  }
+
+  /** Deletes a whole block (a table, diagram, code, picture, line…) from the document. */
+  const removeBlock = (b: DocBlock, what: string): void => {
+    commit()
+    applyDoc(replaceBlock(sourceRef.current, b, ''), `Delete ${what}`)
+  }
+
+  const linkItems: MenuItem[] = linkEl.current
+    ? [
+        { label: 'Open link', keys: 'Ctrl+click', run: () => window.open(normaliseUrl(linkEl.current?.getAttribute('href') ?? ''), '_blank', 'noopener') },
+        { label: 'Edit link…', run: () => setLinkBox(linkEl.current?.getAttribute('href') ?? '') },
+        {
+          label: 'Remove link (keep the words)',
+          run: () => {
+            const a = linkEl.current
+            linkEl.current = null
+            if (!a?.isConnected) return
+            const block = a.closest<HTMLElement>('[data-block]')
+            a.replaceWith(...Array.from(a.childNodes))
+            current.current = block
+            last.current = block
+            typed()
+          }
+        },
+        'sep'
+      ]
+    : []
+
   const menuItems: MenuItem[] = [
+    ...linkItems,
     { label: 'Cut', keys: 'Ctrl+X', run: () => (restore(), document.execCommand('cut'), typed()) },
     { label: 'Copy', keys: 'Ctrl+C', run: () => (restore(), document.execCommand('copy')) },
     {
@@ -474,67 +634,90 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
         onContextMenu={(e) => {
           if (!(e.target as HTMLElement).closest('.doc-block')) return
           e.preventDefault()
+          linkEl.current = (e.target as HTMLElement).closest('a')
           remember()
           setMenu({ x: Math.min(e.clientX, window.innerWidth - 250), y: Math.min(e.clientY, window.innerHeight - 560) })
         }}
       >
-        <article className="markdown-body doc-body">
-          {blocks.map((b, i) =>
-            EDITABLE.has(b.kind) ? (
-              <div
-                key={keys[i]}
-                data-block={i}
-                className={`doc-block${focused === i ? ' on' : ''}`}
-                contentEditable
-                suppressContentEditableWarning
-                spellCheck
-                dangerouslySetInnerHTML={{ __html: html[i] }}
-                onFocus={(e) => {
-                  if (current.current && current.current !== e.currentTarget) commit()
-                  current.current = e.currentTarget
-                  last.current = e.currentTarget
-                  setFocused(i)
-                }}
-                onBlur={(e) => {
-                  // Clicking the bar, the link box or the menu keeps the paragraph open.
-                  const to = e.relatedTarget as HTMLElement | null
-                  if (to?.closest('.doc-bar, .doc-linkbox, .doc-menu, .dict-panel, .dictation-bar, .read-panel')) return
-                  commit()
-                  current.current = null
-                  setFocused(null)
-                  // Redraw from the document now that nobody is typing in it.
-                  setBlocks(splitBlocks(sourceRef.current))
-                }}
-                onKeyUp={remember}
-                onMouseUp={remember}
-                onInput={onInput}
-                onKeyDown={onKeyDown}
-                onClick={(e) => {
-                  // Ctrl+click opens a link, as in Word.
-                  const a = (e.target as HTMLElement).closest('a')
-                  if (a && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault()
-                    window.open(normaliseUrl(a.getAttribute('href') ?? ''), '_blank', 'noopener')
-                  }
-                }}
-              />
-            ) : (
-              <div
-                key={keys[i]}
-                className={`doc-locked doc-${b.kind}`}
-                title={LOCK_HINT[b.kind]}
-                onDoubleClick={() => {
-                  if (b.kind === 'table') props.onTableEdit(b.start)
-                  else if (b.kind === 'code' || b.kind === 'mermaid') {
-                    const m = b.text.match(/^(\s*)(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)\n\s*\2\s*$/)
-                    setCodeEdit({ block: b, lang: m ? m[3].trim() : '', code: m ? m[4] : b.text })
-                  }
-                }}
-              >
-                <div dangerouslySetInnerHTML={{ __html: html[i] }} />
-              </div>
-            )
-          )}
+        <article className="markdown-body doc-body" ref={bodyRef}>
+          {blocks.map((b, i) => (
+            <div key={keys[i]} className={`doc-row doc-row-${b.kind}`}>
+              {EDITABLE.has(b.kind) ? (
+                <div
+                  data-block={i}
+                  className={`doc-block${focused === i ? ' on' : ''}`}
+                  contentEditable
+                  suppressContentEditableWarning
+                  spellCheck
+                  dangerouslySetInnerHTML={{ __html: html[i] }}
+                  onFocus={(e) => {
+                    if (current.current && current.current !== e.currentTarget) commit()
+                    current.current = e.currentTarget
+                    last.current = e.currentTarget
+                    setFocused(i)
+                  }}
+                  onBlur={(e) => {
+                    // Clicking the bar, the link box or the menu keeps the paragraph open.
+                    const to = e.relatedTarget as HTMLElement | null
+                    if (to?.closest('.doc-bar, .doc-linkbox, .doc-menu, .dict-panel, .dictation-bar, .read-panel')) return
+                    commit()
+                    current.current = null
+                    setFocused(null)
+                    // Redraw from the document now that nobody is typing in it.
+                    setBlocks(splitBlocks(sourceRef.current))
+                  }}
+                  onKeyUp={remember}
+                  onMouseUp={remember}
+                  onInput={onInput}
+                  onKeyDown={onKeyDown}
+                  onClick={(e) => {
+                    // Ctrl+click opens a link, as in Word.
+                    const a = (e.target as HTMLElement).closest('a')
+                    if (a && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault()
+                      window.open(normaliseUrl(a.getAttribute('href') ?? ''), '_blank', 'noopener')
+                    }
+                  }}
+                />
+              ) : (
+                <div
+                  className={`doc-locked doc-${b.kind}`}
+                  title={LOCK_HINT[b.kind]}
+                  onDoubleClick={(e) => {
+                    // Tables: double-click a cell edits it (the table tools); elsewhere opens the editor.
+                    if (b.kind === 'table' && (e.target as HTMLElement).closest('td, th')) return
+                    if (b.kind === 'table') props.onTableEdit(b.start)
+                    else if (b.kind === 'code' || b.kind === 'mermaid') openCode(b)
+                  }}
+                >
+                  <div dangerouslySetInnerHTML={{ __html: html[i] }} />
+                </div>
+              )}
+              {/* Corner buttons: change or delete the whole block. Page numbers stay. */}
+              {b.kind !== 'page' && (
+                <span className="doc-actions" onMouseDown={(e) => e.preventDefault()}>
+                  {b.kind === 'table' && (
+                    <button onClick={() => props.onTableEdit(b.start)} title="Edit this table in the table editor">
+                      ✎ Edit table
+                    </button>
+                  )}
+                  {(b.kind === 'code' || b.kind === 'mermaid') && (
+                    <button onClick={() => openCode(b)} title={b.kind === 'mermaid' ? 'Edit this diagram' : 'Edit this code'}>
+                      ✎ Edit
+                    </button>
+                  )}
+                  {b.kind === 'toc' && (
+                    <button onClick={() => props.onUpdateToc?.()} title="Bring the table of contents up to date">
+                      ↻ Update
+                    </button>
+                  )}
+                  <button className="doc-del" onClick={() => removeBlock(b, KIND_NAME[b.kind])} title={`Delete this ${KIND_NAME[b.kind]} (Ctrl+Z brings it back)`}>
+                    🗑
+                  </button>
+                </span>
+              )}
+            </div>
+          ))}
           <div
             className="doc-block doc-new"
             contentEditable
@@ -548,6 +731,16 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
           />
         </article>
       </div>
+
+      <TableTools
+        hostRef={bodyRef}
+        scrollerRef={host}
+        source={source}
+        html={allHtml}
+        enabled={!!props.onTableChange}
+        onTableEdit={props.onTableEdit}
+        onTableChange={props.onTableChange}
+      />
 
       {menu && (
         <div className="doc-menu" role="menu" style={{ left: menu.x, top: Math.max(8, menu.y) }} onMouseDown={(e) => e.preventDefault()}>
@@ -585,15 +778,13 @@ const DocEditor = forwardRef<DocEditorHandle, Props>(function DocEditor(props, r
               <button
                 className="primary"
                 onClick={() => {
-                  const { block, lang, code } = codeEdit
+                  const { block, lang, code, after } = codeEdit
                   setCodeEdit(null)
                   const fence = code.includes('```') ? '````' : '```'
                   const md = `${fence}${lang.trim()}\n${code.replace(/\s+$/, '')}\n${fence}`
-                  if (block.text) onChange(replaceBlock(sourceRef.current, block, md), 'Edit code')
-                  else {
-                    const after = blocksRef.current.find((x) => x.end === block.start) ?? null
-                    onChange(insertAfter(sourceRef.current, block.start >= 0 ? after : null, md), 'Insert code block')
-                  }
+                  commit()
+                  if (block.text) applyDoc(replaceBlock(sourceRef.current, block, md), 'Edit code')
+                  else applyDoc(insertAfter(sourceRef.current, after ?? null, md), 'Insert code block')
                 }}
               >
                 {codeEdit.block.text ? 'Save' : 'Insert'}

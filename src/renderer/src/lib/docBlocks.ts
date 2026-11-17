@@ -147,7 +147,8 @@ export function blockToMarkdown(html: string): string {
     .turndown(html)
     // A browser adds a lone <br> to an emptied line.
     .replace(/\n{3,}/g, '\n\n')
-    .trim()
+    // Not .trim(): a first-line indent (em spaces) is part of the text.
+    .replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '')
   return out
 }
 
@@ -216,18 +217,47 @@ export function restyle(text: string, style: Style, item = 0): string {
       return lines.map((l) => (l.trim() ? `> ${l}` : '>')).join('\n')
     case 'indent':
     case 'outdent': {
-      // Only lists indent; the k-th item and its own lines below it.
       const starts = lines.map((l, i) => (ITEM.test(l) ? i : -1)).filter((i) => i >= 0)
-      if (!starts.length) return text
-      const from = starts[Math.min(item, starts.length - 1)]
+      if (!starts.length) {
+        // A paragraph: a first-line indent, like a tab in a word processor.
+        // Never leading spaces, which Markdown would turn into a code block.
+        if (HEAD.test(lines[0]) || QUOTE.test(lines[0])) return text
+        const first = lines[0]
+        if (style === 'indent') return [`  ${first}`, ...lines.slice(1)].join('\n')
+        return [first.replace(/^ {1,2}/, ''), ...lines.slice(1)].join('\n')
+      }
+      // A list item, with its own lines below it, one level in or out.
+      const k = Math.min(item, starts.length - 1)
+      const from = starts[k]
+      const indentOf = (l: string): number => (l.match(/^\s*/) ?? [''])[0].length
+      const own = indentOf(lines[from])
       let to = from + 1
-      const own = (lines[from].match(/^\s*/) ?? [''])[0].length
-      while (to < lines.length && lines[to].trim() && (lines[to].match(/^\s*/) ?? [''])[0].length > own) to++
+      while (to < lines.length && (!lines[to].trim() || indentOf(lines[to]) > own) && !(ITEM.test(lines[to]) && indentOf(lines[to]) <= own)) to++
+      while (to > from + 1 && !lines[to - 1].trim()) to--
+      let target = own
+      if (style === 'indent') {
+        // Under the item above, never deeper: the first item cannot move in.
+        if (k === 0) return text
+        const prev = lines[starts[k - 1]]
+        const m = prev.match(ITEM)!
+        const contentAt = m[1].length + m[2].length + 1
+        if (own >= contentAt) return text
+        target = contentAt
+      } else {
+        if (own === 0) return text
+        // Back to the level of the nearest item above that is further out.
+        const parent = starts
+          .slice(0, k)
+          .reverse()
+          .map((s) => indentOf(lines[s]))
+          .find((n) => n < own)
+        target = parent ?? 0
+      }
+      const delta = target - own
       return lines
         .map((l, i) => {
-          if (i < from || i >= to) return l
-          if (style === 'indent') return `  ${l}`
-          return l.replace(/^ {1,2}/, '')
+          if (i < from || i >= to || !l.trim()) return l
+          return delta > 0 ? `${' '.repeat(delta)}${l}` : l.replace(new RegExp(`^ {0,${-delta}}`), '')
         })
         .join('\n')
     }

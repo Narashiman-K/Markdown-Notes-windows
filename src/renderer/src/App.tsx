@@ -28,6 +28,7 @@ import DiagramDialog from './components/DiagramDialog'
 import DocEditor, { type DocEditorHandle } from './components/DocEditor'
 import { insertAfter } from './lib/docBlocks'
 import { undoScope } from './lib/undoScope'
+import { installEscapeClose } from './lib/escapeClose'
 import { markdownLink, normaliseUrl } from './lib/links'
 import AiToolsDialog, { type AiTool } from './components/AiToolsDialog'
 import { pathKey, snapshot } from './lib/versions'
@@ -213,6 +214,8 @@ export default function App(): React.JSX.Element {
   const insertDocMarkdown = (md: string, label: string): void => {
     docRef.current?.commit()
     const line = docRef.current?.insertLine() ?? null
+    // Stop the frozen writing view, so the new block shows at once.
+    docRef.current?.release()
     setContent((cur) => {
       const next = insertAfter(cur, line === null ? null : { kind: 'text', start: line, end: line, text: '' }, md)
       setHistory((h) => record(h, cur, label))
@@ -997,6 +1000,8 @@ export default function App(): React.JSX.Element {
       // Usage counts: the command's name only, never its argument.
       const cmd = commandName(action)
       if (cmd) track('command', { name: cmd })
+      // The Insert menu acts in the Doc Editor too (headings, lists, table, code…).
+      if (docOnRef.current && action.startsWith('insert:') && docRef.current?.run(action)) return
       if (action.startsWith('ai:tool:')) {
         setAiTool(action.slice(8) as AiTool)
         return
@@ -1108,9 +1113,22 @@ export default function App(): React.JSX.Element {
             undoScope.current(dir)
             return
           }
+          // Doc Editor: typing is saved into the document as you go, so Undo and
+          // Redo walk the document's history (the words typed since the last pause first).
+          if (docOnRef.current && !document.activeElement?.closest('.modal')) {
+            if (docRef.current?.pending()) {
+              docRef.current.commit()
+              window.setTimeout(() => void actionRef.current(action), 40)
+              return
+            }
+            docRef.current?.release()
+            if (dir === 'undo') doUndo()
+            else doRedo()
+            return
+          }
           // Typing in a box of a dialog: the box's own undo.
           const box = document.activeElement as HTMLElement | null
-          if (box && (box.isContentEditable || (/^(INPUT|TEXTAREA)$/.test(box.tagName) && box.closest('.modal')))) {
+          if (box && !box.closest('.cm-editor') && (box.isContentEditable || (/^(INPUT|TEXTAREA)$/.test(box.tagName) && box.closest('.modal')))) {
             document.execCommand(dir)
             return
           }
@@ -1550,6 +1568,9 @@ export default function App(): React.JSX.Element {
     []
   )
 
+  // Esc closes whichever popup is in front (lib/escapeClose.ts).
+  useEffect(() => installEscapeClose(), [])
+
   // Anonymous usage statistics (see lib/analytics.ts), with a one-time notice.
   useEffect(() => {
     startAnalytics('windows', __APP_VERSION__)
@@ -1898,6 +1919,12 @@ export default function App(): React.JSX.Element {
                 if (range && table) setTableDialog({ kind: 'edit', table, range, via: 'view' })
               }}
               onInsertImage={() => void actionRef.current('insert:image')}
+              onUpdateToc={() => void actionRef.current('insert:toc')}
+              onTableChange={(line, change, label) => {
+                const range = tableAtLine(content, line)
+                const table = range ? parseTable(linesOf(content, range)) : null
+                if (range && table) commitContent(replaceLines(content, range, serializeTable(change(table))), label)
+              }}
             />
           ) : mode === 'view' ? (
             <Preview

@@ -1934,3 +1934,12 @@ html[data-reader] .markdown-body { padding-bottom: 110px; }
 .doc-menu button:hover { background: var(--hover); }
 .doc-menu .menu-accel { color: var(--muted); font-size: 12px; }
 .doc-menu .menu-sep { height: 1px; margin: 4px 6px; background: var(--chrome-border); }
+/* Doc Editor: each block in a row, with its corner buttons on hover */
+.doc-row { position: relative; }
+.doc-actions { position: absolute; top: -2px; right: -8px; display: none; gap: 4px; z-index: 4; }
+.doc-row:hover > .doc-actions, .doc-row:focus-within > .doc-actions { display: inline-flex; }
+.doc-actions button { font: 12px system-ui, 'Segoe UI', sans-serif; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--chrome-border); background: var(--chrome); color: var(--fg); cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); }
+.doc-actions button:hover { border-color: #e8833a; box-shadow: 0 0 6px rgba(232, 131, 58, 0.45); }
+.doc-actions .doc-del:hover { border-color: #d13438; color: #d13438; box-shadow: 0 0 6px rgba(209, 52, 56, 0.35); }
+.doc-row-text > .doc-actions, .doc-row-heading > .doc-actions, .doc-row-list > .doc-actions, .doc-row-quote > .doc-actions { right: -36px; }
+.doc-locked:hover::after { content: none; }
