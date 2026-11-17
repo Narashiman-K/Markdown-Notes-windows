@@ -25,6 +25,8 @@ import DiffDialog from './components/DiffDialog'
 import { analyticsAvailable, analyticsNoticeDue, analyticsOn, commandName, setAnalytics, startAnalytics, track } from './lib/analytics'
 import VersionsDialog from './components/VersionsDialog'
 import DiagramDialog from './components/DiagramDialog'
+import DocEditor, { type DocEditorHandle } from './components/DocEditor'
+import { insertAfter } from './lib/docBlocks'
 import { undoScope } from './lib/undoScope'
 import { markdownLink, normaliseUrl } from './lib/links'
 import AiToolsDialog, { type AiTool } from './components/AiToolsDialog'
@@ -200,6 +202,20 @@ export default function App(): React.JSX.Element {
   const [showAbout, setShowAbout] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
   const [showDiagram, setShowDiagram] = useState(false)
+  // The Doc Editor is on (it shows in place of the View page).
+  const [docOn, setDocOn] = useState(false)
+  const docRef = useRef<DocEditorHandle>(null)
+  /** Markdown put after the paragraph being written in the Doc Editor (or at the end). */
+  const insertDocMarkdown = (md: string, label: string): void => {
+    docRef.current?.commit()
+    const line = docRef.current?.insertLine() ?? null
+    setContent((cur) => {
+      const next = insertAfter(cur, line === null ? null : { kind: 'text', start: line, end: line, text: '' }, md)
+      setHistory((h) => record(h, cur, label))
+      return next
+    })
+    setDirty(true)
+  }
   const [aiTool, setAiTool] = useState<AiTool | null>(null)
   const [convertSeed, setConvertSeed] = useState<string[] | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -1081,7 +1097,7 @@ export default function App(): React.JSX.Element {
           }
           // Typing in a box of a dialog: the box's own undo.
           const box = document.activeElement as HTMLElement | null
-          if (box && /^(INPUT|TEXTAREA)$/.test(box.tagName) && box.closest('.modal')) {
+          if (box && (box.isContentEditable || (/^(INPUT|TEXTAREA)$/.test(box.tagName) && box.closest('.modal')))) {
             document.execCommand(dir)
             return
           }
@@ -1100,6 +1116,12 @@ export default function App(): React.JSX.Element {
           setConvertSeed((s) => s ?? [])
           return
         case 'file:save':
+          // Doc Editor: what is being typed goes into the document first.
+          if (docOn && docRef.current?.pending()) {
+            docRef.current.commit()
+            window.setTimeout(() => void actionRef.current('file:save'), 30)
+            return
+          }
           await doSave(false)
           return
         case 'file:saveAs':
@@ -1237,11 +1259,19 @@ export default function App(): React.JSX.Element {
          */
         case 'view:mode:view':
           setReaderOn(false)
+          setDocOn(false)
           setMode('view')
           return
         case 'view:mode:edit':
           setReaderOn(false)
+          setDocOn(false)
           setMode('edit')
+          return
+        case 'view:mode:doc':
+          // Doc Editor: write formatted text; the file stays Markdown (components/DocEditor.tsx).
+          setReaderOn(false)
+          setMode('view')
+          setDocOn(true)
           return
         case 'view:zoom:in':
           setZoom((z) => ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, ZOOM_LEVELS.findIndex((v) => v >= z) + 1)] ?? z)
@@ -1388,13 +1418,17 @@ export default function App(): React.JSX.Element {
           return
         }
         case 'insert:image': {
-          if (mode !== 'edit') {
+          if (mode !== 'edit' && !docOn) {
             flash('Switch to Edit mode (Ctrl+E) to insert an image.')
             return
           }
           const r = await window.api.pickImage()
           if (!r.ok || !r.filePath) return
           const base = await window.api.basename(r.filePath)
+          if (docOn) {
+            insertDocMarkdown(`![${base}](${toFileUrl(r.filePath)})`, 'Insert picture')
+            return
+          }
           editorEdit((t, f, to) => ({
             text: t.slice(0, f) + `![${base}](${toFileUrl(r.filePath!)})` + t.slice(to),
             selectionStart: f,
@@ -1798,6 +1832,7 @@ export default function App(): React.JSX.Element {
       <Toolbar
         mode={mode}
         readerOn={readerOn}
+        docOn={docOn}
         zoom={zoom}
         dirty={dirty}
         fileName={fileName}
@@ -1838,7 +1873,20 @@ export default function App(): React.JSX.Element {
         )}
 
         <section className="stage">
-          {mode === 'view' ? (
+          {mode === 'view' && docOn && !readerOn ? (
+            <DocEditor
+              ref={docRef}
+              source={content}
+              zoom={zoom}
+              onChange={(next, label) => commitContent(next, label)}
+              onTableEdit={(line) => {
+                const range = tableAtLine(content, line)
+                const table = range ? parseTable(linesOf(content, range)) : null
+                if (range && table) setTableDialog({ kind: 'edit', table, range, via: 'view' })
+              }}
+              onInsertImage={() => void actionRef.current('insert:image')}
+            />
+          ) : mode === 'view' ? (
             <Preview
               ref={previewRef}
               source={content}
@@ -2037,7 +2085,7 @@ export default function App(): React.JSX.Element {
       )}
 
       <footer className="statusbar" data-mn-ignore>
-        <span>{mode === 'view' ? 'View mode' : `Edit mode · Ln ${cursor.line}, Col ${cursor.col}`}</span>
+        <span>{mode === 'view' ? (docOn && !readerOn ? 'Doc Editor · writes Markdown for you' : 'View mode') : `Edit mode · Ln ${cursor.line}, Col ${cursor.col}`}</span>
         <span>{stats.words} words</span>
         <span>{stats.chars} chars</span>
         <span>{annotations.length} annotations</span>
@@ -2111,6 +2159,7 @@ export default function App(): React.JSX.Element {
           onClose={() => setShowDiagram(false)}
           onInsert={(block) => {
             setShowDiagram(false)
+            if (docOn) return insertDocMarkdown(block, 'Insert diagram')
             if (mode === 'edit' && editorRef.current) return editorEdit((t, f, to) => insertBlock(t, f, to, block))
             commitContent(content.replace(/\s*$/, '') + '\n\n' + block + '\n', 'Insert diagram')
             flash('Diagram added at the end of the document. Ctrl+Z to undo.')

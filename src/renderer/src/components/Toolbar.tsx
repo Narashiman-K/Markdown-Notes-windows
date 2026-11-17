@@ -2,6 +2,8 @@ interface Props {
   mode: 'view' | 'edit'
   /** Reading is a third mode as far as anyone using this is concerned. */
   readerOn: boolean
+  /** The Doc Editor is on (a fourth mode beside View, Edit and Read). */
+  docOn?: boolean
   zoom: number
   dirty: boolean
   fileName: string
@@ -61,7 +63,7 @@ export default function Toolbar(props: Props): React.JSX.Element {
       <div className="tb-group">
         <div className="segmented">
           <button
-            className={mode === 'view' && !readerOn ? 'on' : ''}
+            className={mode === 'view' && !readerOn && !props.docOn ? 'on' : ''}
             onClick={() => onAction('view:mode:view')}
             title="View mode (Ctrl+Shift+V)"
           >
@@ -73,6 +75,13 @@ export default function Toolbar(props: Props): React.JSX.Element {
             title="Edit mode (Ctrl+E)"
           >
             Edit
+          </button>
+          <button
+            className={mode === 'view' && !readerOn && props.docOn ? 'on' : ''}
+            onClick={() => onAction('view:mode:doc')}
+            title="Doc Editor: write formatted text, like a word processor; the file stays Markdown"
+          >
+            Doc Editor
           </button>
           {/* Reading sits beside the other two because that is how it is
               thought about. Entering it hides the toolbar, so the way back
