@@ -63,6 +63,7 @@
         "markdown-it-deflist": "^3.0.0",
         "markdown-it-footnote": "^4.0.0",
         "markdown-it-task-lists": "^2.1.1",
+        "mermaid": "^11.17.2",
         "onnxruntime-web": "1.31.0-dev.20260914-8d85527a0",
         "pdfjs-dist": "^4.10.38",
         "rcedit": "^5.0.2",
@@ -84,8 +85,5 @@
         "kokoro-js": {
             "@huggingface/transformers": "$@huggingface/transformers"
         }
-    },
-    "dependencies": {
-        "mermaid": "^11.17.2"
     }
 }
