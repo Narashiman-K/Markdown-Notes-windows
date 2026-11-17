@@ -1876,3 +1876,25 @@ button.st-card-q:hover, button.st-card-q.open { color: #e8833a; }
 .diagram-edit label { display: flex; flex-direction: column; gap: 4px; }
 .diagram-edit textarea { width: 100%; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 12px; resize: vertical; }
 .diagram-preview { min-height: 200px; border: 1px dashed var(--rule); border-radius: 8px; padding: 6px; background: var(--bg); }
+
+/* Read aloud in reader mode: one quiet floating player, in the page's own colours.
+   Only what is needed while reading: back, play/pause, next, stop, where you are,
+   the voice and the speed. Style, info and the extra options stay out of the way. */
+.reader-listen { width: 100%; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--reader-rule, var(--chrome-border)); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.reader-listen.on { border-color: #e8833a; box-shadow: 0 0 10px rgba(232, 131, 58, 0.45); }
+html[data-reader] .read-panel {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 40;
+  width: min(760px, calc(100vw - 260px)); border-radius: 14px; padding: 6px 10px;
+  background: var(--reader-raised, var(--chrome)); color: var(--reader-fg, var(--fg));
+  border: 1px solid var(--reader-rule, var(--chrome-border));
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  opacity: 0.96; transition: opacity 0.25s;
+}
+html[data-reader] .read-panel:not(:hover):not(:focus-within) { opacity: 0.55; }
+html[data-reader] .read-panel select,
+html[data-reader] .read-panel button { color: inherit; }
+html[data-reader] .read-panel .read-info,
+html[data-reader] .read-panel .read-inline[title='Reading style'] { display: none; }
+html[data-reader] .read-panel .dict-options { max-height: 40vh; overflow-y: auto; }
+/* The text keeps clear of the player. */
+html[data-reader] .markdown-body { padding-bottom: 110px; }

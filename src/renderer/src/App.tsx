@@ -1762,6 +1762,8 @@ export default function App(): React.JSX.Element {
           settings={reader}
           onChange={changeReader}
           onExit={() => setReaderOn(false)}
+          readOpen={readOpen}
+          onReadAloud={() => void actionRef.current('view:readAloud')}
         />
       )}
       <MenuBar

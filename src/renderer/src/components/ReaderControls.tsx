@@ -23,9 +23,12 @@ interface Props {
   settings: ReaderSettings
   onChange: (next: ReaderSettings) => void
   onExit: () => void
+  /** Read aloud: whether its bar is open, and the button that opens or closes it. */
+  readOpen?: boolean
+  onReadAloud?: () => void
 }
 
-export default function ReaderControls({ settings, onChange, onExit }: Props): React.JSX.Element {
+export default function ReaderControls({ settings, onChange, onExit, readOpen, onReadAloud }: Props): React.JSX.Element {
   const stepper = (
     key: 'width' | 'size' | 'spacing',
     title: string,
@@ -63,6 +66,16 @@ export default function ReaderControls({ settings, onChange, onExit }: Props): R
       <button className="reader-exit" onClick={onExit} title="Leave reader mode (F9 or Esc)">
         ← Exit reader
       </button>
+
+      {onReadAloud && (
+        <button
+          className={`reader-listen${readOpen ? ' on' : ''}`}
+          onClick={onReadAloud}
+          title={readOpen ? 'Close the read-aloud player' : 'Listen: read this aloud with the sentence highlighted (Ctrl+Shift+Space plays and pauses)'}
+        >
+          🔊 {readOpen ? 'Listening' : 'Listen'}
+        </button>
+      )}
 
       <div className="reader-divider" />
 
