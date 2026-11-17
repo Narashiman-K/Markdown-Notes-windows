@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { renderMarkdown } from '../lib/markdown'
 import { drawMermaid } from '../lib/mermaidView'
+import { linkTarget } from '../lib/links'
 import { buildSourceMap, rangeToOffsets, toSourceRange, trimRange } from '../lib/align'
 import type { Table } from '../lib/table'
 import TableTools from './TableTools'
@@ -197,6 +198,17 @@ export default function LivePreview({
         className="markdown-body"
         style={{ fontSize: `${zoom * 15}px` }}
         dangerouslySetInnerHTML={{ __html: html }}
+        onClick={(e) => {
+          // Links in the preview: web addresses open in the browser (a new tab),
+          // contents links scroll here; nothing navigates the app itself away.
+          const a = (e.target as HTMLElement).closest('a')
+          const written = a?.getAttribute('href') ?? ''
+          if (!a || !written) return
+          e.preventDefault()
+          const go = linkTarget(written)
+          if (go.kind === 'external') window.open(go.url, '_blank', 'noopener')
+          else if (go.kind === 'anchor') bodyRef.current?.querySelector(`[id="${CSS.escape(go.id)}"]`)?.scrollIntoView({ block: 'start' })
+        }}
       />
 
       <TableTools

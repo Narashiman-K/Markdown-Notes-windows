@@ -25,6 +25,7 @@ import DiffDialog from './components/DiffDialog'
 import { analyticsAvailable, analyticsNoticeDue, analyticsOn, commandName, setAnalytics, startAnalytics, track } from './lib/analytics'
 import VersionsDialog from './components/VersionsDialog'
 import DiagramDialog from './components/DiagramDialog'
+import { markdownLink, normaliseUrl } from './lib/links'
 import AiToolsDialog, { type AiTool } from './components/AiToolsDialog'
 import { pathKey, snapshot } from './lib/versions'
 import { installSignature, signatureComment } from './lib/signature'
@@ -279,7 +280,7 @@ export default function App(): React.JSX.Element {
   const [dialog, setDialog] = useState<
     | { kind: 'newComment'; range: [number, number] }
     | { kind: 'editNote'; id: string; initial: string }
-    | { kind: 'link'; from: number; to: number }
+    | { kind: 'link'; from: number; to: number; view?: boolean }
     | null
   >(null)
 
@@ -1360,11 +1361,17 @@ export default function App(): React.JSX.Element {
           return
         }
         case 'insert:link': {
-          if (mode !== 'edit') {
-            flash('Switch to Edit mode (Ctrl+E) to insert a link.')
+          // View mode: the selected text on the page; Edit mode: the editor's selection.
+          if (mode !== 'edit' || !editorRef.current) {
+            const r = previewRef.current?.getSelectionRange()
+            if (!r) {
+              flash('Select the words to turn into a link first, then choose Link (or press Ctrl+K).')
+              return
+            }
+            setDialog({ kind: 'link', from: r[0], to: r[1], view: true })
             return
           }
-          const sel = editorRef.current!.getSelection()
+          const sel = editorRef.current.getSelection()
           setDialog({ kind: 'link', from: sel.from, to: sel.to })
           return
         }
@@ -1840,6 +1847,7 @@ export default function App(): React.JSX.Element {
               }}
               onAnnotate={(type, color) => annotate(type, color)}
               onComment={() => void actionRef.current('annot:comment')}
+              onLink={() => void actionRef.current('insert:link')}
               onRemoveAnnotation={doRemove}
               onSelectAnnotation={setActiveId}
               onEditAnnotationNote={(id) => {
@@ -2270,21 +2278,27 @@ export default function App(): React.JSX.Element {
       )}
       {dialog?.kind === 'link' && (
         <NoteDialog
-          title="Insert link"
+          title="Insert link (the web address; https:// is added if you leave it out)"
           initial=""
-          placeholder="https://example.com"
+          placeholder="astrology.suprasuta.in  or  https://…  or  name@example.com"
+          saveLabel="Insert link"
           onCancel={() => setDialog(null)}
-          onSave={(url) => {
-            const { from, to } = dialog
+          onSave={(typed) => {
+            const { from, to, view } = dialog
             setDialog(null)
+            // "example.com" becomes https://example.com, an e-mail address a mailto: link.
+            const url = normaliseUrl(typed)
             if (!url) return
+            if (view) {
+              commitContent(content.slice(0, from) + markdownLink(content.slice(from, to), url) + content.slice(to), 'Insert link')
+              previewRef.current?.clearSelection()
+              flash('Link added. Click it to open it in your browser. Ctrl+Z to undo.')
+              return
+            }
             editorEdit((t, f, tt) => {
-              const label = t.slice(f, tt) || 'link'
-              const inserted = `[${label}](${url})`
+              const inserted = markdownLink(t.slice(f, tt), url)
               return { text: t.slice(0, f) + inserted + t.slice(tt), selectionStart: f, selectionEnd: f + inserted.length }
             })
-            void from
-            void to
           }}
         />
       )}

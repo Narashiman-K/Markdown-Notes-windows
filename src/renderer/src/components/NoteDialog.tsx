@@ -4,11 +4,13 @@ interface Props {
   title: string
   initial: string
   placeholder?: string
+  /** The confirm button's words ("Save comment" unless given). */
+  saveLabel?: string
   onCancel: () => void
   onSave: (value: string) => void
 }
 
-export default function NoteDialog({ title, initial, placeholder, onCancel, onSave }: Props): React.JSX.Element {
+export default function NoteDialog({ title, initial, placeholder, saveLabel, onCancel, onSave }: Props): React.JSX.Element {
   const [value, setValue] = useState(initial)
   const ref = useRef<HTMLTextAreaElement>(null)
 
@@ -35,7 +37,7 @@ export default function NoteDialog({ title, initial, placeholder, onCancel, onSa
         <div className="modal-actions">
           <button onClick={onCancel}>Cancel</button>
           <button className="primary" onClick={() => onSave(value.trim())}>
-            Save comment
+            {saveLabel ?? 'Save comment'}
           </button>
         </div>
         <p className="muted small">Ctrl+Enter to save · Esc to cancel</p>

@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { renderMarkdown } from '../lib/markdown'
 import { drawMermaid } from '../lib/mermaidView'
+import { linkTarget } from '../lib/links'
 import { readPageSize, sheetStyle } from '../lib/pages'
 import { buildSourceMap, indexTextNodes, domToOffset, toSourceRange, type TextNodeIndexEntry } from '../lib/align'
 import { HIGHLIGHT_COLORS } from '../lib/annotations'
@@ -23,6 +24,8 @@ interface Props {
   activeAnnotation: string | null
   onAnnotate: (type: AnnotationType, color?: string) => void
   onComment: () => void
+  /** Turns the selected text into a link. */
+  onLink?: () => void
   onRemoveAnnotation: (id: string) => void
   onSelectAnnotation: (id: string | null) => void
   /**
@@ -193,11 +196,12 @@ const Preview = forwardRef<PreviewHandle, Props>(function Preview(props, ref) {
       const written = anchor?.getAttribute('href') ?? ''
       if (anchor && written) {
         e.preventDefault()
-        if (written.startsWith('#')) {
-          const id = decodeURIComponent(written.slice(1))
-          hostRef.current?.querySelector(`[id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start' })
-        } else if (/^(https?:|mailto:)/i.test(written)) {
-          window.open(anchor.href, '_blank')
+        // A web address written without https:// (astrology.suprasuta.in) opens too.
+        const go = linkTarget(written)
+        if (go.kind === 'anchor') {
+          hostRef.current?.querySelector(`[id="${CSS.escape(go.id)}"]`)?.scrollIntoView({ block: 'start' })
+        } else if (go.kind === 'external') {
+          window.open(go.url, '_blank')
         }
       }
     }
@@ -291,6 +295,11 @@ const Preview = forwardRef<PreviewHandle, Props>(function Preview(props, ref) {
           <button title="Add comment" onClick={props.onComment}>
             💬
           </button>
+          {props.onLink && (
+            <button title="Make a link (Ctrl+K)" onClick={props.onLink}>
+              🔗
+            </button>
+          )}
           <button
             title="Remove annotation"
             onClick={() => {

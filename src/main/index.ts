@@ -322,7 +322,8 @@ function createWindow(openPath?: string): BrowserWindow {
   })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url)) shell.openExternal(url)
+    // Web pages open in the browser; an e-mail link opens the mail app.
+    if (/^https?:/i.test(url) || /^mailto:[^\s]+$/i.test(url)) shell.openExternal(url)
     // One narrow exception to the http-only rule: the Store's own review
     // dialog for this exact product. Pinning the whole URL rather than the
     // scheme means a stray link cannot use ms-windows-store: to open an

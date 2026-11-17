@@ -18,7 +18,9 @@ export const md: MarkdownIt = new MarkdownIt({
   html: true,
   xhtmlOut: false,
   breaks: false,
-  linkify: false,
+  // Full web addresses typed or pasted as plain text (https://…) become links.
+  // Only ones with their https:// (see below): "readme.md" must stay a word.
+  linkify: true,
   typographer: false,
   highlight(str, lang) {
     if (lang && hljs.getLanguage(lang)) {
@@ -35,6 +37,8 @@ export const md: MarkdownIt = new MarkdownIt({
   .use(footnote)
   .use(deflist)
   .use(pagesPlugin)
+
+md.linkify.set({ fuzzyLink: false, fuzzyEmail: false, fuzzyIP: false })
 
 /*
  * Stamps each block element with the source line it came from.
