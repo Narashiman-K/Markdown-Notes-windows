@@ -271,6 +271,10 @@ function createWindow(openPath?: string): BrowserWindow {
     icon: appIconPath(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
+      // Store screenshots render off screen, so they come out the same while
+      // the machine is locked or the window is covered.
+      // Drawn at 1.5x so a small screen still gives Store-sized pictures.
+      offscreen: process.env['MARKNOTE_SHOTS_ONLY'] === '1.3' ? { deviceScaleFactor: 1.5 } : false,
       contextIsolation: true,
       nodeIntegration: false,
       // Chromium's sandbox around the page. The preload uses only the parts
@@ -1525,7 +1529,9 @@ function fileFromArgv(argv: string[]): string | null {
 const harness = process.env['MARKNOTE_SMOKE'] === '1' || process.env['MARKNOTE_SHOTS'] === '1'
 if (harness) {
   const profile = join(tmpdir(), `${APP_ASCII_NAME} (test run)`)
-  rmSync(profile, { recursive: true, force: true })
+  // The 1.3 screenshot run keeps its profile, so the read-aloud voice (310 MB)
+  // downloads once rather than on every run.
+  if (process.env['MARKNOTE_SHOTS_ONLY'] !== '1.3') rmSync(profile, { recursive: true, force: true })
   app.setPath('userData', profile)
 }
 

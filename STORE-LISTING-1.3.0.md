@@ -220,17 +220,19 @@ The microphone is used only for dictation, when the user starts it. The app down
 
 ## Screenshots to add
 
-Store screenshots: 1366×768 or larger, PNG. Up to 10. The first one is the one most people see. Dark theme looks best. Suggested order:
+The new ones are ready in `store-screenshots/1.3.0/` (PNG, 1938×1236, dark theme). They are made by the app itself (`MARKNOTE_SHOTS=1`, `MARKNOTE_SHOTS_ONLY=1.3`), off screen, on the sample book `samples/store-book.md`. Upload in this order (the first is the one most people see):
 
-| # | What to show | How to set it up |
+| # | File | Caption (optional) |
 | --- | --- | --- |
-| 1 | **Doc Editor** writing formatted text | Open a short document with a heading, a list and a table; click Doc Editor; right-click a word so the menu shows |
-| 2 | **Read aloud** with the highlight | Open a book chapter, press Read aloud ▶; capture while a sentence is highlighted and the bar shows "wpm" |
-| 3 | **Mind map + Study panel** | Open a book, Alt+M, click a chapter, then Study → Quiz with an answer showing |
-| 4 | **Reader mode with Listen** | F9, Sepia page, the floating player at the bottom |
-| 5 | **Table editor** | Insert → Table → pick 4×3; the grid popup open |
-| 6 | **Diagram** | Insert → Diagram (Mermaid), the dialog with its live preview |
-| 7 | **Version history** | Save twice with a change; File → Version history |
-| 8 | **Compare documents** | (keep the current one) |
-| 9 | **Converted PDF in page view with page numbers** | (keep the current one, or retake to show the small page number footer) |
-| 10 | **Annotations** | (keep the current one) |
+| 1 | `1.3.0/01-doc-editor.png` | Doc Editor: write like a word processor; the file stays Markdown |
+| 2 | `1.3.0/02-read-aloud.png` | Read aloud with each sentence highlighted and your words per minute |
+| 3 | `1.3.0/03-mind-map-study.png` | Mind map of the book, with a Study quiz |
+| 4 | `1.3.0/04-reader-listen.png` | Reader mode with read aloud built in |
+| 5 | `1.3.0/05-table-editor.png` | Edit tables in a grid |
+| 6 | `1.3.0/06-diagram.png` | Diagrams from a few lines of text |
+| 7 | `1.3.0/07-version-history.png` | Every save kept: compare and restore |
+| 8 | `06-compare.png` (existing) | Compare documents |
+| 9 | `09-pdf-pictures-page-view.png` (existing) | A PDF converted with its pictures, at page size |
+| 10 | `01-annotate.png` (existing) | Highlights and comments saved in the Markdown |
+
+Remove the other 1.2 screenshots in Partner Center so these ten are the set.
