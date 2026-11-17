@@ -117,6 +117,12 @@ function turndown(): TurndownService {
   // Underline typed with Ctrl+U has no Markdown form: kept as HTML.
   td.keep(['u'])
   td.remove(['script', 'style'])
+  // Strikethrough as ~~text~~ (the GFM plugin writes one ~, which this app's
+  // Markdown does not read as strikethrough).
+  td.addRule('strike', {
+    filter: ['del', 's', 'strike'] as unknown as TurndownService.Filter,
+    replacement: (content) => (content.trim() ? `~~${content}~~` : '')
+  })
   // "- item", not Turndown's "-   item": the way people (and this app) write lists.
   td.addRule('listItem', {
     filter: 'li',
@@ -169,6 +175,63 @@ export function insertAfter(markdown: string, b: DocBlock | null, block: string)
   const before = lines.slice(0, at).join('\n').replace(/\s+$/, '')
   const after = lines.slice(at).join('\n').replace(/^\s+/, '')
   return `${before}${before ? '\n\n' : ''}${block}\n${after ? `\n${after}` : ''}`
+}
+
+/* --------------------------------------------------- paragraph styles */
+
+export type Style = 'p' | 'h1' | 'h2' | 'h3' | 'ul' | 'ol' | 'quote' | 'indent' | 'outdent'
+
+const HEAD = /^#{1,6}\s+/
+const QUOTE = /^>\s?/
+const ITEM = /^(\s*)([-*+]|\d+[.)])\s+/
+
+/** A line's words without its heading, quote or list marker. */
+const bare = (l: string): string => l.replace(QUOTE, '').replace(HEAD, '').replace(ITEM, '').replace(/^\[[ xX]\]\s+/, '').trim()
+
+/**
+ * A block in another paragraph style, written as Markdown directly (the way
+ * a word processor applies a style to the paragraph the caret is in).
+ * Bullets, numbers and quote toggle off when the block already has them.
+ * Indent and outdent move the list item `item` (0-based) and what belongs to it.
+ */
+export function restyle(text: string, style: Style, item = 0): string {
+  const lines = text.split('\n')
+  const content = lines.map(bare).filter(Boolean)
+  const isList = (re: RegExp): boolean => lines.filter((l) => l.trim()).every((l) => re.test(l) || /^\s+\S/.test(l))
+  switch (style) {
+    case 'p':
+      return content.join('\n\n')
+    case 'h1':
+    case 'h2':
+    case 'h3':
+      return `${'#'.repeat(Number(style[1]))} ${content.join(' ')}`
+    case 'ul':
+      if (isList(/^\s*[-*+]\s/)) return content.join('\n\n')
+      return content.map((c) => `- ${c}`).join('\n')
+    case 'ol':
+      if (isList(/^\s*\d+[.)]\s/)) return content.join('\n\n')
+      return content.map((c, i) => `${i + 1}. ${c}`).join('\n')
+    case 'quote':
+      if (lines.filter((l) => l.trim()).every((l) => QUOTE.test(l))) return lines.map((l) => l.replace(QUOTE, '')).join('\n')
+      return lines.map((l) => (l.trim() ? `> ${l}` : '>')).join('\n')
+    case 'indent':
+    case 'outdent': {
+      // Only lists indent; the k-th item and its own lines below it.
+      const starts = lines.map((l, i) => (ITEM.test(l) ? i : -1)).filter((i) => i >= 0)
+      if (!starts.length) return text
+      const from = starts[Math.min(item, starts.length - 1)]
+      let to = from + 1
+      const own = (lines[from].match(/^\s*/) ?? [''])[0].length
+      while (to < lines.length && lines[to].trim() && (lines[to].match(/^\s*/) ?? [''])[0].length > own) to++
+      return lines
+        .map((l, i) => {
+          if (i < from || i >= to) return l
+          if (style === 'indent') return `  ${l}`
+          return l.replace(/^ {1,2}/, '')
+        })
+        .join('\n')
+    }
+  }
 }
 
 export const TEMPLATES = {

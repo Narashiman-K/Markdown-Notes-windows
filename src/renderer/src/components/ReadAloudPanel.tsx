@@ -55,7 +55,10 @@ function naturalSystemVoices(): SpeechSynthesisVoice[] {
 
 function documentRoot(): { root: HTMLElement | null; scroller: HTMLElement | null } {
   const root = document.querySelector('.preview-host .markdown-body') as HTMLElement | null
-  return { root, scroller: (root?.closest('.preview-scroll') as HTMLElement | null) ?? null }
+  if (root) return { root, scroller: (root.closest('.preview-scroll') as HTMLElement | null) ?? null }
+  // The Doc Editor's page reads aloud too.
+  const doc = document.querySelector('.doc-page .doc-body') as HTMLElement | null
+  return { root: doc, scroller: (doc?.closest('.doc-page') as HTMLElement | null) ?? null }
 }
 
 export default function ReadAloudPanel(props: Props): React.JSX.Element {

@@ -1928,3 +1928,9 @@ html[data-reader] .markdown-body { padding-bottom: 110px; }
 .doc-code, .doc-mermaid, .doc-table { cursor: pointer; }
 .doc-code-modal { width: min(760px, 94vw); }
 .doc-code-text { width: 100%; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 13px; resize: vertical; margin-top: 8px; }
+.doc-tool.on { border-color: #e8833a; box-shadow: 0 0 8px rgba(232, 131, 58, 0.45); }
+.doc-menu { position: fixed; z-index: 60; min-width: 230px; max-height: calc(100vh - 16px); overflow-y: auto; padding: 4px; border-radius: 8px; background: var(--chrome); color: var(--fg); border: 1px solid var(--backlit-edge, var(--chrome-border)); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3), 0 0 14px var(--backlit-soft, transparent); }
+.doc-menu button { display: flex; justify-content: space-between; gap: 18px; width: 100%; padding: 5px 10px; border: none; border-radius: 5px; background: transparent; color: inherit; font: 13px system-ui, 'Segoe UI', sans-serif; text-align: left; cursor: pointer; }
+.doc-menu button:hover { background: var(--hover); }
+.doc-menu .menu-accel { color: var(--muted); font-size: 12px; }
+.doc-menu .menu-sep { height: 1px; margin: 4px 6px; background: var(--chrome-border); }

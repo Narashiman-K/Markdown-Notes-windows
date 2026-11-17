@@ -204,6 +204,10 @@ export default function App(): React.JSX.Element {
   const [showDiagram, setShowDiagram] = useState(false)
   // The Doc Editor is on (it shows in place of the View page).
   const [docOn, setDocOn] = useState(false)
+  const docOnRef = useRef(false)
+  useEffect(() => {
+    docOnRef.current = docOn && !readerOn
+  })
   const docRef = useRef<DocEditorHandle>(null)
   /** Markdown put after the paragraph being written in the Doc Editor (or at the end). */
   const insertDocMarkdown = (md: string, label: string): void => {
@@ -514,6 +518,14 @@ export default function App(): React.JSX.Element {
 
   /** Dictated text goes in at the editor's cursor, joined to what precedes it. */
   const applyDictation = useCallback((actions: DictationAction[]) => {
+    // The Doc Editor: words go where its caret is.
+    if (docOnRef.current && docRef.current) {
+      for (const a of actions) {
+        if (a.kind === 'undo') document.execCommand('undo')
+        else if (a.kind === 'text' && !docRef.current.insertText(a.text)) flash('Click in the text where the words should go, then speak.')
+      }
+      return
+    }
     const editor = editorRef.current
     if (!editor) return
     for (const a of actions) {
@@ -1058,13 +1070,14 @@ export default function App(): React.JSX.Element {
           // The toolbar button opens and closes the bar.
           if (barsOpen.current.dictation) setDictationOpen(false)
           else {
-            setMode('edit')
+            // The Doc Editor takes dictation itself; otherwise the Markdown editor does.
+            if (!docOnRef.current) setMode('edit')
             setDictationOpen(true)
           }
           return
         case 'edit:dictate':
-          // Dictation types at the editor's cursor, so it needs the editor.
-          setMode('edit')
+          // Dictation types at the editor's cursor (or the Doc Editor's).
+          if (!docOnRef.current) setMode('edit')
           if (barsOpen.current.dictation) setDictationToggle((n) => n + 1)
           else setDictationOpen(true)
           return
