@@ -36,6 +36,8 @@ export default function Toolbar(props: Props): React.JSX.Element {
         {btn('file:open', '📂', 'Open… (Ctrl+O)')}
         {btn('file:save', '💾', 'Save (Ctrl+S)', dirty ? 'accent' : '')}
         {btn('file:print', '🖨', 'Print… (Ctrl+P)')}
+        {btn('edit:undo', '↶', 'Undo (Ctrl+Z): in the editor, the view, tables, links, AI changes…')}
+        {btn('edit:redo', '↷', 'Redo (Ctrl+Y or Ctrl+Shift+Z)')}
       </div>
 
       {/* Labelled rather than an icon alone: merging is new, and a word says

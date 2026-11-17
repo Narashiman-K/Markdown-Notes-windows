@@ -306,7 +306,8 @@ export default function MindMapView(props: Props): React.JSX.Element {
     return true
   }
   useEffect(() => {
-    props.registerUndo?.(editMode ? undoRedo : null)
+    // Undo and redo act on the map whenever it is open (tags, quiz answers, moves, edits).
+    props.registerUndo?.(undoRedo)
     return () => props.registerUndo?.(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editMode])

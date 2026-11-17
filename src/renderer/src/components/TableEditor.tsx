@@ -10,6 +10,7 @@
  * Kept identical across the Windows app and the web app.
  */
 import { useEffect, useRef, useState } from 'react'
+import { undoScope } from '../lib/undoScope'
 import {
   addColumn,
   addRow,
@@ -42,7 +43,63 @@ const ALIGNS: Array<[Align, string, string]> = [
 ]
 
 export default function TableEditor({ initial, isNew, onApply, onCancel }: Props): React.JSX.Element {
-  const [t, setT] = useState<Table>(initial)
+  const [t, setTable] = useState<Table>(initial)
+  /*
+   * Undo and redo inside the table editor (Ctrl+Z, Ctrl+Y, and the ↶ ↷
+   * buttons). Typing in a cell is one step per pause, not per letter.
+   */
+  const tRef = useRef(t)
+  tRef.current = t
+  const past = useRef<Table[]>([])
+  const future = useRef<Table[]>([])
+  const lastAt = useRef(0)
+  const [, setSteps] = useState(0)
+  const setT = (next: Table): void => {
+    const cur = tRef.current
+    if (next === cur) return
+    const now = Date.now()
+    if (now - lastAt.current > 700) past.current = [...past.current.slice(-199), cur]
+    lastAt.current = now
+    future.current = []
+    tRef.current = next
+    setTable(next)
+    setSteps((s) => s + 1)
+  }
+  const undoRedo = (dir: 'undo' | 'redo'): boolean => {
+    const from = dir === 'undo' ? past : future
+    const to = dir === 'undo' ? future : past
+    const prev = from.current[from.current.length - 1]
+    if (!prev) return false
+    from.current = from.current.slice(0, -1)
+    to.current = [...to.current, tRef.current]
+    tRef.current = prev
+    lastAt.current = 0
+    setTable(prev)
+    setSteps((s) => s + 1)
+    return true
+  }
+  // The app's Undo and Redo (menu, toolbar, Ctrl+Z on Windows) act here while it is open.
+  const undoRef = useRef(undoRedo)
+  undoRef.current = undoRedo
+  useEffect(() => {
+    undoScope.current = (dir) => undoRef.current(dir)
+    return () => {
+      undoScope.current = null
+    }
+  }, [])
+  const onUndoKeys = (e: React.KeyboardEvent): void => {
+    if (!(e.ctrlKey || e.metaKey)) return
+    const k = e.key.toLowerCase()
+    if (k === 'z' && !e.shiftKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      undoRedo('undo')
+    } else if (k === 'y' || (k === 'z' && e.shiftKey)) {
+      e.preventDefault()
+      e.stopPropagation()
+      undoRedo('redo')
+    }
+  }
   const [at, setAt] = useState<{ r: number; c: number }>({ r: initial.rows.length > 1 ? 1 : 0, c: 0 })
   const [showSource, setShowSource] = useState(false)
   const grid = useRef<HTMLDivElement>(null)
@@ -110,10 +167,14 @@ export default function TableEditor({ initial, isNew, onApply, onCancel }: Props
 
   return (
     <div className="modal-backdrop" data-mn-ignore onMouseDown={onCancel}>
-      <div className="modal table-editor" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-label="Table editor">
+      <div className="modal table-editor" onMouseDown={(e) => e.stopPropagation()} onKeyDownCapture={onUndoKeys} role="dialog" aria-label="Table editor">
         <h3>{isNew ? 'New table' : 'Edit table'}</h3>
 
         <div className="tbl-tools" role="toolbar">
+          <span className="tbl-group" aria-label="Undo">
+            {btn('↶', `Undo (Ctrl+Z)${past.current.length ? '' : ': nothing to undo'}`, () => void undoRedo('undo'), !past.current.length)}
+            {btn('↷', `Redo (Ctrl+Y)${future.current.length ? '' : ': nothing to redo'}`, () => void undoRedo('redo'), !future.current.length)}
+          </span>
           <span className="tbl-group" aria-label="Rows">
             <span className="tbl-label">Row</span>
             {btn('＋↑', 'Add a row above', () => (setT(addRow(t, Math.max(1, r))), setAt({ r: Math.max(1, r), c })))}

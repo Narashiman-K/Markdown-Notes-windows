@@ -25,6 +25,7 @@ import DiffDialog from './components/DiffDialog'
 import { analyticsAvailable, analyticsNoticeDue, analyticsOn, commandName, setAnalytics, startAnalytics, track } from './lib/analytics'
 import VersionsDialog from './components/VersionsDialog'
 import DiagramDialog from './components/DiagramDialog'
+import { undoScope } from './lib/undoScope'
 import { markdownLink, normaliseUrl } from './lib/links'
 import AiToolsDialog, { type AiTool } from './components/AiToolsDialog'
 import { pathKey, snapshot } from './lib/versions'
@@ -520,7 +521,7 @@ export default function App(): React.JSX.Element {
       }
       setHistory(result.state)
       setDirty(true)
-      flash(`Undid: ${result.label}`)
+      flash(`Undid: ${result.label}. Ctrl+Y redoes it.`)
       return result.content
     })
   }, [flash, history, mode])
@@ -530,7 +531,7 @@ export default function App(): React.JSX.Element {
     setContent((current) => {
       const result = redoHistory(history, current)
       if (!result) {
-        flash('Nothing to redo.')
+        flash('Nothing to redo: redo brings back what Undo took away.')
         return current
       }
       setHistory(result.state)
@@ -1073,6 +1074,17 @@ export default function App(): React.JSX.Element {
         case 'edit:undo':
         case 'edit:redo': {
           const dir = action === 'edit:undo' ? 'undo' : 'redo'
+          // A popup with its own history (the table editor) first.
+          if (undoScope.current) {
+            undoScope.current(dir)
+            return
+          }
+          // Typing in a box of a dialog: the box's own undo.
+          const box = document.activeElement as HTMLElement | null
+          if (box && /^(INPUT|TEXTAREA)$/.test(box.tagName) && box.closest('.modal')) {
+            document.execCommand(dir)
+            return
+          }
           if (mindUndo.current) {
             // Typing in a box on the map: the box's own undo.
             const el = document.activeElement as HTMLElement | null
