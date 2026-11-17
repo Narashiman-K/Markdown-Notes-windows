@@ -77,26 +77,28 @@ describe('rendering page notes', () => {
 })
 
 describe('placing a table of contents', () => {
-  it('goes under the title, not at the end', async () => {
+  it('goes before the first chapter, after the title and front matter', async () => {
     const { placeToc } = await import('../src/renderer/src/lib/toc')
-    const r = placeToc('# Book\n\nIntro text.\n\n## One\n\nA.\n\n## Two\n\nB.\n')
-    expect(r.updated).toBe(false)
-    expect(r.text.indexOf('<!-- toc -->')).toBeLessThan(r.text.indexOf('Intro text.'))
-    expect(r.text.startsWith('# Book\n\n<!-- toc -->')).toBe(true)
-    expect(placeToc(r.text).updated).toBe(true)
+    const r = placeToc('# Book\n\nBy someone. Copyright.\n\n## One\n\nA.\n\n## Two\n\nB.\n')
+    expect(r.where).toBe('new')
+    expect(r.text.indexOf('<!-- toc -->')).toBeGreaterThan(r.text.indexOf('Copyright'))
+    expect(r.text.indexOf('<!-- toc -->')).toBeLessThan(r.text.indexOf('## One'))
+    expect(placeToc(r.text).where).toBe('block')
   })
-  it('goes first when there is no title', async () => {
+  it('updates the book own contents section in place, keeping page notes, and never duplicates', async () => {
     const { placeToc } = await import('../src/renderer/src/lib/toc')
-    expect(placeToc('## One\n\nA.\n').text.startsWith('<!-- toc -->')).toBe(true)
-  })
-})
-
-describe('a contents block lower down', () => {
-  it('moves to the top', async () => {
-    const { placeToc } = await import('../src/renderer/src/lib/toc')
-    const r = placeToc('# Book\n\nIntro.\n\n## One\n\nA.\n\n<!-- toc -->\nold\n<!-- /toc -->\n')
-    expect(r.moved).toBe(true)
-    expect(r.text.startsWith('# Book\n\n<!-- toc -->\n- [One](#one)')).toBe(true)
+    const book = ['# Book', '', '<!-- toc -->', '- old', '<!-- /toc -->', '', 'Title page.', '', '### Table of Contents', '', '- [Chapter 1](#page-9)', '- Chapter 2', 'run on text', '', '— 6 —', '', '<!-- suprasuta:page-break page="7" -->', '', '- [Chapter 3](#page-20)', '', '### Chapter 1', '', 'A.', '', '### Chapter 2', '', 'B.', ''].join('\n')
+    const r = placeToc(book)
+    expect(r.where).toBe('section')
     expect(r.text.match(/<!-- toc -->/g)?.length).toBe(1)
+    const at = r.text.indexOf('<!-- toc -->')
+    expect(at).toBeGreaterThan(r.text.indexOf('### Table of Contents'))
+    expect(r.text).toContain('- [Chapter 1](#chapter-1)')
+    expect(r.text).not.toContain('run on text')
+    expect(r.text).toContain('— 6 —')
+    expect(r.text).toContain('page-break page="7"')
+    // The contents heading itself is not listed.
+    expect(r.text).not.toContain('[Table of Contents]')
+    expect(placeToc(r.text).text).toBe(r.text)
   })
 })

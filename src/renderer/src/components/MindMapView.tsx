@@ -72,6 +72,9 @@ interface Props {
   registerUndo?: (fn: ((dir: 'undo' | 'redo') => boolean) | null) => void
 }
 
+/** Whether the Study panel was open, kept while the map is closed and reopened. */
+let studyWasOpen = false
+
 const PALETTE = ['#4C9BE8', '#F28C38', '#4FB487', '#A77BE0', '#E2678C', '#36AFC0', '#C9A227', '#7F93AD']
 const W = 268
 const FONT = "system-ui, 'Segoe UI', sans-serif"
@@ -229,7 +232,10 @@ export default function MindMapView(props: Props): React.JSX.Element {
   const [progress, setProgress] = useState('')
   const [unsaved, setUnsaved] = useState(false)
   // The study panel: quiz, Q&A cards, tags and search, export.
-  const [study, setStudy] = useState(false)
+  // Stays open when the reader leaves the map for the document and comes back.
+  const [study, setStudyState] = useState(studyWasOpen)
+  const setStudy = (v: boolean | ((o: boolean) => boolean)): void =>
+    setStudyState((o) => (studyWasOpen = typeof v === 'function' ? v(o) : v))
   const hostRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const alive = useRef(true)
@@ -1039,7 +1045,7 @@ export default function MindMapView(props: Props): React.JSX.Element {
                 {p.title} <span className="muted">· {p.steps.length} steps</span>
               </button>
             ))}
-            {!processes.length && <p className="muted">No step-by-step process (numbered steps) here. Flowcharts show processes; the ideas of this part are in the mind map.</p>}
+            {!processes.length && <p className="muted">A flowchart draws a procedure from the book (an exercise, a method, a how-to with numbered steps) as boxes and arrows, so you can follow it at a glance. There is none in this part: its ideas are on the mind map. ✨ below can turn its main method into steps, if it has one.</p>}
             <button className="mm-ai" onClick={() => void aiSteps()} disabled={!!progress} title="Have the AI write this part's main process as steps">
               ✨ Make one with AI
             </button>
@@ -1063,14 +1069,21 @@ export default function MindMapView(props: Props): React.JSX.Element {
             change={change}
             ai={props.ai}
             saveText={props.saveText}
-            onOpen={(node, chapterId) => {
-              props.onFocus(chapterId === tree.id ? null : chapterId)
+            onOpen={(node, chapterId, go) => {
+              // Reading a card keeps you where you are; "show on the map" opens its chapter.
+              if (go) props.onFocus(chapterId === tree.id ? null : chapterId)
               if (node.line >= 0 && node.kind !== 'doc') setPeek(node)
             }}
             onClose={() => setStudy(false)}
           />
         )}
-        {kind === 'map' && placed.length <= 1 && <div className="mm-empty">This document has no headings yet. Add some (Insert → Heading) and they become the cards of the map.</div>}
+        {kind === 'map' && placed.length <= 1 && (
+          <div className="mm-empty">
+            {focusNode
+              ? 'This part has no sub-topics or paragraphs of its own: everything it says is on its card. Click the card to read it, or ← Back.'
+              : 'This document has no headings yet. Add some (Insert → Heading) and they become the cards of the map.'}
+          </div>
+        )}
       </div>
       <div className="mm-foot">
         {kind === 'flow'

@@ -43,15 +43,44 @@ export interface StudyCard {
 
 const clean = (t: string): string => t.replace(/\s+/g, ' ').trim()
 
-/** A question and answer from a card's own text, without any AI. */
-export function offlineQA(n: MapNode): QA {
+/**
+ * Parts of a converted book that are not worth studying: the contents list,
+ * copyright and promotion pages, page furniture.
+ */
+export function isFiller(n: MapNode): boolean {
+  const text = clean(`${n.title} ${n.card.idea} ${n.card.summary}`)
+  if (/\b(table of contents|copyright|all rights reserved|click here|free (copy|gift|bonus|download)|isbn|about the author)\b/i.test(text)) return true
+  if (/www\.|https?:\/\//i.test(text)) return true
+  if ((text.match(/\bchapter \d+/gi) ?? []).length >= 3) return true
+  return clean(`${n.card.idea} ${n.card.summary}`).length < 40
+}
+
+const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * A question and answer from a card's own text, without any AI.
+ *
+ * Paragraph cards become "fill the gap" questions: the card's key sentence
+ * with its most telling keyword blanked out. It is always about this book,
+ * and recalling the missing word recalls the point. Chapters and sections
+ * ask for their main points.
+ */
+export function offlineQA(n: MapNode, chapter = ''): QA {
   const idea = clean(n.card.idea)
   const sum = clean(n.card.summary)
-  const keys = n.card.keywords.filter(Boolean).slice(0, 3)
-  const answer = [idea, sum && sum !== idea ? sum : ''].filter(Boolean).join('\n\n')
-  if (n.kind === 'heading') return { q: `What are the key points of “${clean(n.title)}”?`, a: answer }
-  if (keys.length) return { q: `What does the book say about ${keys.join(', ')}?`, a: answer }
-  return { q: `Recall the point: “${clean(n.title).slice(0, 80)}…”`, a: answer }
+  const where = chapter && chapter !== n.title ? ` (${clean(chapter)})` : ''
+  if (n.kind === 'heading') {
+    return { q: `What are the main points of “${clean(n.title)}”${where}?`, a: sum || idea }
+  }
+  const answerText = [idea, sum && sum !== idea && !idea.includes(sum) ? sum : ''].filter(Boolean).join('\n\n')
+  for (const k of n.card.keywords.map((x) => x.replace(/^#/, '').trim()).filter((x) => x.length > 3)) {
+    const re = new RegExp(`\\b${esc(k)}\\b`, 'i')
+    const m = idea.match(re)
+    if (m) return { q: `Fill the gap${where}: “${idea.replace(re, '_____')}”`, a: `${m[0]}\n\n${answerText}` }
+  }
+  const key = n.card.keywords[0]?.replace(/^#/, '')
+  if (key) return { q: `What does the book say about “${key}”${where}?`, a: answerText }
+  return { q: `Recall the point${where} that begins: “${idea.split(/\s+/).slice(0, 6).join(' ')}…”`, a: answerText }
 }
 
 /** The cards of a map (or of one chapter's map), in reading order, ready to study. */
@@ -68,11 +97,12 @@ export function deck(scope: MapNode, state: MapState): StudyCard[] {
   visit(scope, scope.kind === 'doc' ? null : scope)
   walk(scope, (n) => {
     if (n === scope && scope.kind === 'doc') return
-    const text = clean(`${n.card.idea} ${n.card.summary}`)
-    if (text.length < 12) return
     const own = state.qa?.[n.id]
-    const qa = own ?? offlineQA(n)
+    // Your own cards and your own questions always count; filler pages never.
+    if (!own && n.kind !== 'custom' && isFiller(n)) return
     const ch = chapterOf.get(n.id) ?? scope
+    if (!own && ch !== n && isFiller(ch)) return
+    const qa = own ?? offlineQA(n, ch.title)
     out.push({
       id: n.id,
       title: n.title,
@@ -219,6 +249,24 @@ export function toAnki(cards: StudyCard[], deckName: string): string {
     lines.push(`${html(c.q)}\t${html(c.a)}\t${[...new Set(tags)].join(' ')}`)
   }
   return lines.join('\n') + '\n'
+}
+
+/** A readable study sheet: questions under their chapters, each answer beneath. */
+export function toStudySheet(cards: StudyCard[], title: string): string {
+  const out = [`# ${title}: study questions`, '', `_${cards.length} questions. Cover the answers and test yourself._`, '']
+  let chapter = ''
+  let n = 0
+  for (const c of cards) {
+    if (c.chapter !== chapter) {
+      chapter = c.chapter
+      out.push(`## ${chapter}`, '')
+    }
+    n++
+    out.push(`**${n}. ${c.q}**`, '')
+    out.push(...c.a.split(/\n+/).map((l) => `> ${l}`), '')
+    if (c.tags.length) out.push(`_Tags: ${c.tags.join(', ')}_`, '')
+  }
+  return out.join('\n')
 }
 
 /* --------------------------------------------------------- AI */

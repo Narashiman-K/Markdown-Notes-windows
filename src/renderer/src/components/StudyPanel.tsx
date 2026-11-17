@@ -16,6 +16,7 @@ import {
   toAnki,
   toCsv,
   toggleTag,
+  toStudySheet,
   type StudyCard
 } from '../lib/study'
 
@@ -35,7 +36,8 @@ interface Props {
   }
   saveText: (name: string, text: string, mime: string) => Promise<void>
   /** Shows a card: opens its chapter's map and its passage. */
-  onOpen: (card: MapNode, chapterId: string) => void
+  /** Shows a card's passage; with go, also opens its chapter's map. */
+  onOpen: (card: MapNode, chapterId: string, go?: boolean) => void
   onClose: () => void
 }
 
@@ -85,6 +87,8 @@ export default function StudyPanel(props: Props): React.JSX.Element {
 
   /* -------------------------------------------------- cards */
   const [editing, setEditing] = useState<{ id: string; q: string; a: string } | null>(null)
+  // The card whose answer is showing in the list.
+  const [open, setOpen] = useState<string | null>(null)
   const [newTag, setNewTag] = useState('')
 
   const aiQA = async (): Promise<void> => {
@@ -239,7 +243,7 @@ export default function StudyPanel(props: Props): React.JSX.Element {
                         </button>
                       </div>
                       <button className="link small" onClick={() => props.onOpen(current.node, current.chapterId)}>
-                        📄 Show this part of the map
+                        📖 Read this part of the book
                       </button>
                     </>
                   ) : (
@@ -307,13 +311,37 @@ export default function StudyPanel(props: Props): React.JSX.Element {
                   </div>
                 ) : (
                   <>
-                    <div className="st-card-q">
+                    <button
+                      className={`st-card-q${open === c.id ? ' open' : ''}`}
+                      onClick={() => setOpen(open === c.id ? null : c.id)}
+                      title={open === c.id ? 'Hide the answer' : 'Show the answer and what you can do with this card'}
+                      aria-expanded={open === c.id}
+                    >
                       <span>{c.q}</span>
-                      <button className="link" onClick={() => setEditing({ id: c.id, q: c.q, a: c.a })} title="Edit the question and answer">
-                        ✎
-                      </button>
-                    </div>
-                    <div className="st-card-a muted small">{c.a.length > 220 ? `${c.a.slice(0, 218)}…` : c.a}</div>
+                      <span className="muted">{open === c.id ? '▴' : '▾'}</span>
+                    </button>
+                    {open === c.id ? (
+                      <>
+                        <div className="st-card-a">{c.a}</div>
+                        <div className="muted small">From: {c.chapter === c.title ? c.chapter : `${c.chapter} › ${c.title}`}</div>
+                        <div className="st-actions st-card-actions">
+                          <button onClick={() => props.onOpen(c.node, c.chapterId)} title="Read this part of the book in a popup">
+                            📖 Read it
+                          </button>
+                          <button onClick={() => props.onOpen(c.node, c.chapterId, true)} title="Open this card's chapter on the mind map">
+                            🗺 On the map
+                          </button>
+                          <button onClick={() => (setQueue([c.id, ...queue.filter((x) => x !== c.id)]), setShown(false), setTab('quiz'))} title="Ask me this one now">
+                            🎯 Quiz me
+                          </button>
+                          <button onClick={() => setEditing({ id: c.id, q: c.q, a: c.a })} title="Edit the question and answer">
+                            ✎ Edit
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="st-card-a muted small">Click the question to see the answer.</div>
+                    )}
                     {tagChips(c)}
                   </>
                 )}
@@ -353,7 +381,7 @@ export default function StudyPanel(props: Props): React.JSX.Element {
           <ul className="st-list">
             {found.slice(0, 200).map((c) => (
               <li key={c.id}>
-                <button className="st-found" onClick={() => props.onOpen(c.node, c.chapterId)} title="Show it on the map">
+                <button className="st-found" onClick={() => props.onOpen(c.node, c.chapterId, true)} title="Open its chapter's map and read it">
                   <strong>{c.title}</strong>
                   <span className="muted small">{c.chapter}</span>
                 </button>
@@ -375,12 +403,19 @@ export default function StudyPanel(props: Props): React.JSX.Element {
               </option>
             </select>
           </label>
-          <button onClick={() => void props.saveText(`${fileBase} - Anki.txt`, toAnki(exportSet(exportWhich), fileBase), 'text/plain')}>
-            Anki flashcards (.txt)
+          <button onClick={() => void props.saveText(`${fileBase} - study questions.md`, toStudySheet(exportSet(exportWhich), fileBase), 'text/markdown')}>
+            📄 Study sheet to read or print (.md)
           </button>
-          <p className="muted small">In Anki: File → Import, choose this file. The deck, the columns (front, back) and the tags are set by the file itself.</p>
-          <button onClick={() => void props.saveText(`${fileBase} - study cards.csv`, toCsv(exportSet(exportWhich)), 'text/csv')}>Spreadsheet (.csv)</button>
+          <p className="muted small">Every question with its answer beneath, chapter by chapter. Open it in this app to read or print it.</p>
+          <button onClick={() => void props.saveText(`${fileBase} - study cards.csv`, toCsv(exportSet(exportWhich)), 'text/csv')}>📊 Spreadsheet (.csv)</button>
           <p className="muted small">Opens in Excel or Google Sheets: chapter, card, question, answer, tags and whether you knew it.</p>
+          <button onClick={() => void props.saveText(`${fileBase} - Anki import.txt`, toAnki(exportSet(exportWhich), fileBase), 'text/plain')}>
+            🃏 For the Anki flashcard app (.txt)
+          </button>
+          <p className="muted small">
+            Only for Anki (apps.ankiweb.net, free), a flashcard app that asks each card again just before you would forget it. This file is not meant to be read
+            itself: in Anki choose File → Import and pick it, and the deck appears with the questions on the front and the answers on the back.
+          </p>
         </div>
       )}
     </aside>

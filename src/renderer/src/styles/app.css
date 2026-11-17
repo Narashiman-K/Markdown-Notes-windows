@@ -1861,3 +1861,18 @@ button.danger { color: #d13438; }
 .st-edit textarea { width: 100%; resize: vertical; font: inherit; }
 .st-found { display: flex; flex-direction: column; align-items: flex-start; width: 100%; text-align: left; background: transparent; border: none; color: inherit; padding: 0; }
 .st-body input[type='search'], .st-row input { flex: 1; padding: 6px 8px; }
+button.st-card-q { width: 100%; text-align: left; background: transparent; border: none; color: inherit; padding: 0; font: inherit; font-weight: 600; cursor: pointer; }
+button.st-card-q:hover, button.st-card-q.open { color: #e8833a; }
+.st-card-actions { justify-content: flex-start; margin-top: 6px; }
+.st-card-actions button { font-size: 12px; padding: 3px 8px; }
+
+/* Insert → Diagram */
+.diagram-modal { width: min(940px, 95vw); }
+.diagram-body { display: flex; gap: 12px; margin: 8px 0; max-height: 64vh; }
+.diagram-kinds { list-style: none; margin: 0; padding: 0; width: 260px; flex: none; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.diagram-kinds button { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 8px; border-radius: 8px; background: transparent; border: 1px solid var(--chrome-border); color: inherit; }
+.diagram-kinds button.active { border-color: #e8833a; box-shadow: 0 0 8px rgba(232, 131, 58, 0.45); }
+.diagram-edit { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; overflow: auto; }
+.diagram-edit label { display: flex; flex-direction: column; gap: 4px; }
+.diagram-edit textarea { width: 100%; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 12px; resize: vertical; }
+.diagram-preview { min-height: 200px; border: 1px dashed var(--rule); border-radius: 8px; padding: 6px; background: var(--bg); }

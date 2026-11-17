@@ -156,7 +156,13 @@ export default function ReadAloudPanel(props: Props): React.JSX.Element {
     else if (!matched) setNote('The audiobook’s timing file does not match this document’s text, so the text is not highlighted.')
     else if (matched < total * 0.8) setNote(`Highlighting matched ${matched} of ${total} paragraphs of the audiobook.`)
     else setNote('')
-    void b.play(b.hasTiming ? from : undefined).catch(() => setNote('The audiobook could not be played.'))
+    // The bar's state follows the audiobook. Stopping the voice player above
+    // reports "idle", and an audiobook that was already playing (a double-click
+    // to jump elsewhere) fires no new "play" event, so set it here.
+    void b
+      .play(b.hasTiming ? from : undefined)
+      .then(() => setState(b.audio.paused ? 'paused' : 'playing'))
+      .catch(() => setNote('The audiobook could not be played.'))
   }
 
   /** Gathers the document's sentences and starts from the selection or the screen. */

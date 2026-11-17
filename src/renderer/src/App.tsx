@@ -24,6 +24,7 @@ import AiPanel from './components/AiPanel'
 import DiffDialog from './components/DiffDialog'
 import { analyticsAvailable, analyticsNoticeDue, analyticsOn, commandName, setAnalytics, startAnalytics, track } from './lib/analytics'
 import VersionsDialog from './components/VersionsDialog'
+import DiagramDialog from './components/DiagramDialog'
 import AiToolsDialog, { type AiTool } from './components/AiToolsDialog'
 import { pathKey, snapshot } from './lib/versions'
 import { installSignature, signatureComment } from './lib/signature'
@@ -196,6 +197,7 @@ export default function App(): React.JSX.Element {
   const [toast, setToast] = useState<string | null>(null)
   const [showAbout, setShowAbout] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
+  const [showDiagram, setShowDiagram] = useState(false)
   const [aiTool, setAiTool] = useState<AiTool | null>(null)
   const [convertSeed, setConvertSeed] = useState<string[] | null>(null)
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -1343,23 +1345,18 @@ export default function App(): React.JSX.Element {
           else setTableDialog({ kind: 'size', from, to })
           return
         }
-        case 'insert:diagram': {
-          // A starter Mermaid diagram: drawn in View mode and the preview.
-          const block = '```mermaid\nflowchart TD\n  A[Start] --> B{Decision?}\n  B -- Yes --> C[Do this]\n  B -- No --> D[Do that]\n  C --> E[End]\n  D --> E\n```'
-          if (mode === 'edit' && editorRef.current) return editorEdit((t, f, to) => insertBlock(t, f, to, block))
-          commitContent(content.replace(/\s*$/, '') + '\n\n' + block + '\n', 'Insert diagram')
-          flash('Diagram added at the end. Edit its text in Edit mode (mermaid.js.org shows every kind). Ctrl+Z to undo.')
+        case 'insert:diagram':
+          setShowDiagram(true)
           return
-        }
         case 'insert:toc': {
-          // Always at the top (under the title), or the existing one updated.
+          // Updates the book's own contents, or the one already added; never a second one.
           const r = placeToc(content)
           if (r.text === content) {
             flash('The table of contents is already up to date.')
             return
           }
           commitContent(r.text, r.updated ? 'Update table of contents' : 'Insert table of contents')
-          flash(r.moved ? 'Table of contents moved to the top of the document and updated. Ctrl+Z to undo.' : r.updated ? 'Table of contents updated.' : 'Table of contents added at the top. It updates itself when you save. Ctrl+Z to undo.')
+          flash(r.where === 'section' ? 'The book’s table of contents is updated in place: every entry links to its chapter. Ctrl+Z to undo.' : r.where === 'block' ? 'Table of contents updated.' : 'Table of contents added before the first chapter. It updates itself when you save. Ctrl+Z to undo.')
           return
         }
         case 'insert:link': {
@@ -2082,6 +2079,19 @@ export default function App(): React.JSX.Element {
             setDirty(true)
             setMode('view')
             flash(`${name} is ready. Save it to keep it.`)
+          }}
+        />
+      )}
+
+      {showDiagram && (
+        <DiagramDialog
+          editMode={mode === 'edit'}
+          onClose={() => setShowDiagram(false)}
+          onInsert={(block) => {
+            setShowDiagram(false)
+            if (mode === 'edit' && editorRef.current) return editorEdit((t, f, to) => insertBlock(t, f, to, block))
+            commitContent(content.replace(/\s*$/, '') + '\n\n' + block + '\n', 'Insert diagram')
+            flash('Diagram added at the end of the document. Ctrl+Z to undo.')
           }}
         />
       )}

@@ -39,7 +39,9 @@ export function tocList(markdown: string): string {
   // Headings inside an existing contents block are not part of it.
   const heads = extractHeadings(markdown.replace(TOC_BLOCK, ''))
   // The first top-level heading is the document's title, not a section.
-  const list = heads[0]?.level === 1 && heads.filter((h) => h.level === 1).length === 1 ? heads.slice(1) : heads
+  const all = heads[0]?.level === 1 && heads.filter((h) => h.level === 1).length === 1 ? heads.slice(1) : heads
+  // The contents' own heading ("Table of Contents") is not an entry in it.
+  const list = all.filter((h) => !CONTENTS_TITLE.test(plain(h.text)))
   if (!list.length) return '_No headings yet: add some (Insert → Heading) and this list fills itself in._'
   const top = Math.min(...list.map((h) => h.level))
   return list
@@ -63,38 +65,86 @@ export function refreshToc(markdown: string): string {
   return markdown.replace(TOC_BLOCK, () => tocBlock(markdown))
 }
 
+/** A heading that names a contents list. */
+const CONTENTS_TITLE = /^(table of contents|contents|index)$/i
+/** Lines inside a contents section that are not part of the list: page notes and markers. */
+const KEEP_IN_SECTION = /^(\s*|<!--[\s\S]*-->|— \d+ —)$/
+
 /**
- * Adds a contents block at the top of the document, or brings an existing
- * one up to date. "The top" is just under the title (the first # heading)
- * when the document opens with one, otherwise the very start. It never goes
- * where the cursor happens to be: a contents list belongs at the front.
+ * The book's own contents section: a "Table of Contents" (or "Contents")
+ * heading and everything up to the next heading, when it holds at least two
+ * list entries or links. A converted PDF has one like this.
  */
-export function placeToc(markdown: string): { text: string; updated: boolean; moved?: boolean } {
-  if (hasToc(markdown)) {
-    // One put lower down earlier (where the cursor was) moves to the top.
-    const at = markdown.search(TOC_BLOCK)
-    const before = markdown
-      .slice(0, at)
-      .replace(/^---\n[\s\S]*?\n---\n/, '')
-      .replace(/^\s*#\s[^\n]*\n/, '')
-      .trim()
-    if (!before) return { text: refreshToc(markdown), updated: true }
-    const without = markdown.replace(/\n*<!-- toc -->\n[\s\S]*?<!-- \/toc -->\n*/, '\n\n')
-    return { ...placeToc(without), updated: true, moved: true }
+function contentsSection(lines: string[]): { head: number; end: number } | null {
+  let fence = false
+  let inBlock = false
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]
+    if (/^\s*(```|~~~)/.test(l)) fence = !fence
+    if (l.trim() === TOC_START) inBlock = true
+    if (l.trim() === TOC_END) inBlock = false
+    if (fence || inBlock) continue
+    const m = l.match(/^#{1,6}\s+(.+?)\s*#*\s*$/)
+    if (!m || !CONTENTS_TITLE.test(plain(m[1]))) continue
+    let end = i + 1
+    while (end < lines.length && !/^#{1,6}\s/.test(lines[end])) end++
+    const entries = lines.slice(i + 1, end).filter((x) => /^\s*([-*+]|\d+\.)\s|\]\(#/.test(x)).length
+    if (entries >= 2) return { head: i, end }
   }
+  return null
+}
+
+/**
+ * Creates or updates the table of contents, never adding a second one:
+ *
+ *  1. The book already has a contents section ("Table of Contents" heading):
+ *     its list is replaced by the live one, in the same place. Page numbers
+ *     and page breaks inside it stay. A contents block put elsewhere earlier
+ *     is removed, so there is only ever one.
+ *  2. Otherwise a contents block that already exists is updated where it is.
+ *  3. Otherwise a new one goes just before the first chapter or introduction:
+ *     the first heading after the title (front matter such as a title page
+ *     stays above it).
+ */
+export function placeToc(markdown: string): { text: string; updated: boolean; where: 'section' | 'block' | 'new' } {
+  const section = contentsSection(markdown.split('\n'))
+  if (section) {
+    // Take out a contents block that sits outside the book's own section.
+    let lines = markdown.split('\n')
+    const s = lines.findIndex((l) => l.trim() === TOC_START)
+    const e = lines.findIndex((l, i) => i > s && l.trim() === TOC_END)
+    if (s >= 0 && e > s && (s < section.head || s > section.end)) {
+      lines = [...lines.slice(0, s), ...lines.slice(e + 1)]
+      while (s > 0 && s < lines.length && !lines[s - 1].trim() && !lines[s].trim()) lines.splice(s, 1)
+    }
+    const sec = contentsSection(lines)!
+    // The page notes inside the old list (page numbers, page breaks) stay, in order.
+    const notes = lines
+      .slice(sec.head + 1, sec.end)
+      .map((l) => l.trim())
+      .filter((l) => l && KEEP_IN_SECTION.test(l) && l !== TOC_START && l !== TOC_END)
+    const block = tocBlock(lines.join('\n'))
+    const middle = [block, ...notes].join('\n\n')
+    const before = lines.slice(0, sec.head + 1).join('\n')
+    const after = lines.slice(sec.end).join('\n')
+    return { text: `${before}\n\n${middle}\n\n${after}`.replace(/\n{3,}/g, '\n\n'), updated: true, where: 'section' }
+  }
+  if (hasToc(markdown)) return { text: refreshToc(markdown), updated: true, where: 'block' }
+
   const lines = markdown.split('\n')
-  let at = 0
-  // Skip YAML front matter.
-  if (lines[0]?.trim() === '---') {
-    const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
-    if (end > 0) at = end + 1
-  }
-  while (at < lines.length && !lines[at].trim()) at++
-  if (/^#\s/.test(lines[at] ?? '')) at++
+  let fence = false
+  const heads: number[] = []
+  lines.forEach((l, i) => {
+    if (/^\s*(```|~~~)/.test(l)) fence = !fence
+    if (!fence && /^#{1,6}\s/.test(l)) heads.push(i)
+  })
+  const titleIsFirst = heads.length && /^#\s/.test(lines[heads[0]])
+  let at = titleIsFirst ? (heads[1] ?? heads[0] + 1) : (heads[0] ?? 0)
+  if (heads.length === 0) at = 0
   const block = tocBlock(markdown)
   const before = lines.slice(0, at).join('\n').replace(/\s+$/, '')
   const after = lines.slice(at).join('\n').replace(/^\s+/, '')
-  return { text: `${before ? `${before}\n\n` : ''}${block}\n\n${after}`, updated: false }
+  return { text: `${before ? `${before}\n\n` : ''}${block}\n\n${after}`, updated: false, where: 'new' }
 }
 
 /* ------------------------------------------------- older converted files */

@@ -78,3 +78,15 @@ describe('study cards', () => {
     expect(parseQA('not json')).toEqual({})
   })
 })
+
+describe('study questions are about the book', () => {
+  it('skips the contents and promotion pages, and asks fill-the-gap questions', async () => {
+    const { buildTree, readState } = await import('../src/renderer/src/lib/mindmap')
+    const { deck } = await import('../src/renderer/src/lib/study')
+    const md = '# Book\n\n## Table of Contents\n\nChapter 1 Intro Chapter 2 More Chapter 3 End\n\n## Bonus\n\nCLICK HERE to download your FREE copy now from www.example.com today please.\n\n## Chapter 1\n\nCuriosity keeps a conversation going: ask one more question than feels natural, then listen closely to the answer.\n'
+    const cards = deck(buildTree(md, 'Book.md'), readState(''))
+    expect(cards.some((c) => /contents|click here/i.test(c.title + c.a))).toBe(false)
+    expect(cards.length).toBeGreaterThan(0)
+    expect(cards.every((c) => !/chapter, stories, contents/i.test(c.q))).toBe(true)
+  })
+})
